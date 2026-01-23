@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScheduleLLM - 课程表解析工具</title>
+    <title>析课 - 课程表解析工具</title>
     <link rel="stylesheet" href="style.css">
     <!-- SheetJS for Excel processing -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -16,7 +16,10 @@
     <div class="app-container">
         <!-- Configuration Area -->
         <aside class="config-panel no-print">
-            <h1>ScheduleLLM</h1>
+            <div class="brand-title" aria-label="析课 课程表解析工具">
+                <h1 class="brand-title-main">析课</h1>
+                <div class="brand-title-sub">课程表解析工具</div>
+            </div>
 
             <div class="config-group">
                 <label class="btn-primary">
@@ -62,8 +65,7 @@
             <div class="config-group" style="border-top: 1px solid #eee; padding-top: 1rem;">
                 <h3>LLM 智能解析 (可选)</h3>
                 <div class="llm-settings">
-                    <label
-                        style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.8rem;">
+                    <label class="llm-toggle">
                         <input type="checkbox" id="useLLM" checked> 开启 LLM 智能识别 (Qwen/通义千问)
                     </label>
                     <div id="llmConfigFields" style="display: none;">
@@ -81,9 +83,6 @@
                             * 推荐使用阿里云通义千问 (Qwen) 以获得最佳中文解析效果。
                         </p>
                     </div>
-                </div>
-                <div style="margin-top: 1rem; text-align: center;">
-                    <a href="mailto:support@schedulellm.com?subject=ScheduleLLM%20Parsing%20Feedback" id="feedbackLink" style="font-size: 0.8rem; color: #2563eb; text-decoration: none;">遇到识别错误？点击反馈</a>
                 </div>
             </div>
 
@@ -144,7 +143,10 @@
             </div>
 
             <div id="llmHint" class="llm-hint no-print" aria-label="LLM 提示">
-                <p class="llm-hint-text">本工具默认启用大语言模型（LLM）对课程表进行智能识别，通常可在 1 分钟内完成。如需更快生成结果，可取消勾选“开启 LLM 智能识别”，但识别准确性可能降低。</p>
+                <p class="llm-hint-text">
+                    <span class="llm-hint-line">本工具默认启用大语言模型（LLM）对课程表进行智能识别，通常可在 1 分钟内完成。</span>
+                    <span class="llm-hint-line">如需更快生成结果，可取消勾选“开启 LLM 智能识别”，但识别准确性可能降低。</span>
+                </p>
             </div>
 
             <div id="calendarArea" class="calendar-container">
@@ -163,11 +165,17 @@
                     </div>
                 </div>
             </section>
+
+            <div class="brand-footer" aria-label="YedaoAI 品牌">
+                <img src="Logo_yedaoai_Green_Web600.png" alt="YedaoAI Logo" class="brand-logo" loading="lazy" decoding="async">
+                <div class="brand-slogan">析万象课表，成清晰日程</div>
+            </div>
         </main>
     </div>
     <!-- Runtime Configuration (Optional) -->
     <script src="config.js" onerror="console.log('No external config found, using manual input.')"></script>
     <script src="llm_parser.js"></script>
+    <script src="time_utils.js"></script>
     <script src="script.js"></script>
     <script data-goatcounter="https://nene310.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 </body>

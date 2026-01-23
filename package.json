@@ -7,6 +7,8 @@
     "dotenv": "^17.2.3"
   },
   "scripts": {
-    "start": "node server_debug.js"
+    "start": "node server_debug.js",
+    "test": "node tests/time_adjust.test.js"
   }
 }
+

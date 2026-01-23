@@ -42,10 +42,97 @@ body {
     z-index: 20;
 }
 
+@media (max-width: 900px) {
+    .config-panel {
+        width: 280px;
+        padding: 1.25rem;
+        gap: 1.25rem;
+    }
+}
+
+@media (max-width: 720px) {
+    .app-container {
+        flex-direction: column;
+        height: auto;
+        min-height: 100%;
+    }
+    .config-panel {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        box-shadow: none;
+    }
+    .main-content {
+        padding: 1rem;
+    }
+}
+
 h1 {
     font-size: 1.5rem;
     font-weight: 600;
     color: var(--primary-color);
+    text-align: center;
+}
+
+.brand-title {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.brand-title-main {
+    font-size: 1.7rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--primary-color);
+    position: relative;
+    padding-bottom: 0.2rem;
+}
+
+
+.brand-title-sub {
+    font-size: 1rem;
+    color: #3b82f6;
+    letter-spacing: 0.08em;
+    text-align: center;
+}
+
+.brand-footer {
+    margin-top: auto;
+    padding: 1.5rem 0 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+.brand-logo {
+    width: 180px;
+    max-width: 200px;
+    height: auto;
+    object-fit: contain;
+    background: transparent;
+    background-image: none;
+    border: 0;
+    box-shadow: none;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.brand-logo:hover {
+    transform: scale(1.02);
+    opacity: 0.92;
+}
+
+.brand-slogan {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-align: center;
+    letter-spacing: 0.02em;
 }
 
 h3 {
@@ -124,7 +211,7 @@ input[type="time"] {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    margin-top: auto;
+    margin-top: 0.75rem;
 }
 
 .status-text {
@@ -266,7 +353,18 @@ input[type="time"] {
 .llm-settings label {
     font-size: 0.8rem;
     color: var(--text-secondary);
-    margin-bottom: -0.5rem;
+    margin: 0;
+}
+
+.llm-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.llm-toggle input[type="checkbox"] {
+    margin: 0;
 }
 
 /* LLM Progress (Generate Schedule) */
@@ -344,9 +442,19 @@ input[type="time"] {
 
 .llm-hint-text {
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.6;
+    font-size: 0.95rem;
+    text-align: center;
     overflow-wrap: anywhere;
     word-break: break-word;
+}
+
+.llm-hint-line {
+    display: block;
+}
+
+.llm-hint-line + .llm-hint-line {
+    margin-top: 0.35rem;
 }
 
 @keyframes llmHintIn {
@@ -426,6 +534,28 @@ input[type="time"] {
 }
 
 @media (max-width: 768px) {
+    .brand-footer {
+        padding-top: 1rem;
+    }
+
+    .brand-logo {
+        width: 140px;
+        max-width: 160px;
+    }
+
+    .brand-slogan {
+        font-size: 0.8rem;
+    }
+
+    .brand-title-main {
+        font-size: 1.5rem;
+        letter-spacing: 0.14em;
+    }
+
+    .brand-title-sub {
+        font-size: 0.9rem;
+    }
+
     .llm-hint {
         font-size: 16px;
         padding: 10px;

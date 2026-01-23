@@ -150,6 +150,7 @@ function initTimeSettings() {
     const end = document.querySelector('input[type="time"][data-idx="0"][data-type="end"]');
     if (start) start.addEventListener('input', scheduleLLMUpdateTimeSettingsSummary);
     if (end) end.addEventListener('input', scheduleLLMUpdateTimeSettingsSummary);
+    scheduleLLMInitTimeInputHandlers();
 }
 
 function scheduleLLMUpdateTimeSettingsSummary() {
@@ -161,6 +162,145 @@ function scheduleLLMUpdateTimeSettingsSummary() {
     const e = end && end.value ? end.value : '';
     const mid = (s || e) ? (s + (s && e ? '-' : '') + e) : '';
     el.textContent = '第1节' + (mid ? ' ' + mid : '');
+}
+
+function scheduleLLMGetTimeInput(idx, type) {
+    return document.querySelector(`input[type="time"][data-idx="${idx}"][data-type="${type}"]`);
+}
+
+function scheduleLLMGetTimeSlotsFromInputs() {
+    const slots = [];
+    for (let i = 0; i < defaultTimeSlots.length; i++) {
+        const startInput = scheduleLLMGetTimeInput(i, 'start');
+        const endInput = scheduleLLMGetTimeInput(i, 'end');
+        const fallback = defaultTimeSlots[i] || { start: '', end: '' };
+        const start = startInput && startInput.value ? startInput.value : fallback.start;
+        const end = endInput && endInput.value ? endInput.value : fallback.end;
+        slots.push({ start, end });
+    }
+    return slots;
+}
+
+function scheduleLLMGetBaseSlotsForChange(idx, type, prevValue) {
+    const slots = scheduleLLMGetTimeSlotsFromInputs();
+    if (slots[idx]) {
+        if (type === 'start') slots[idx].start = prevValue;
+        if (type === 'end') slots[idx].end = prevValue;
+    }
+    return slots;
+}
+
+function scheduleLLMApplyTimeSlotsToInputs(slots, indices) {
+    indices.forEach(idx => {
+        const entry = slots[idx];
+        if (!entry) return;
+        const startInput = scheduleLLMGetTimeInput(idx, 'start');
+        const endInput = scheduleLLMGetTimeInput(idx, 'end');
+        if (startInput) startInput.value = entry.start;
+        if (endInput) endInput.value = entry.end;
+    });
+}
+
+function scheduleLLMUpdateTimeInputsPrev(indices) {
+    indices.forEach(idx => {
+        const startInput = scheduleLLMGetTimeInput(idx, 'start');
+        const endInput = scheduleLLMGetTimeInput(idx, 'end');
+        if (startInput) startInput.dataset.prev = startInput.value || '';
+        if (endInput) endInput.dataset.prev = endInput.value || '';
+    });
+}
+
+function scheduleLLMShowTimeSettingsError(message) {
+    alert(message);
+}
+
+function scheduleLLMIsCompleteTimeValue(value) {
+    return /^\d{2}:\d{2}$/.test(String(value || ''));
+}
+
+function scheduleLLMHandleTimeInputChange(e, opts = {}) {
+    const input = e && e.target ? e.target : null;
+    if (!input || input.type !== 'time') return;
+    const idx = Number(input.dataset.idx);
+    const type = input.dataset.type;
+    if (!Number.isFinite(idx) || (type !== 'start' && type !== 'end')) return;
+
+    const timeUtils = window.ScheduleLLMTimeUtils;
+    const nextValue = input.value || '';
+    const prevValue = input.dataset.prev || nextValue;
+    const force = !!opts.force;
+
+    if (!timeUtils || typeof timeUtils.isValidTime !== 'function' || typeof timeUtils.computeShiftedSlots !== 'function') {
+        input.dataset.prev = nextValue;
+        scheduleLLMUpdateTimeSettingsSummary();
+        return;
+    }
+
+    const isComplete = scheduleLLMIsCompleteTimeValue(nextValue);
+    if (!isComplete) {
+        if (force && nextValue) {
+            input.value = prevValue;
+            scheduleLLMUpdateTimeSettingsSummary();
+            scheduleLLMShowTimeSettingsError('时间格式不正确');
+        }
+        return;
+    }
+
+    if (!timeUtils.isValidTime(nextValue)) {
+        input.value = prevValue;
+        scheduleLLMUpdateTimeSettingsSummary();
+        scheduleLLMShowTimeSettingsError('时间格式不正确');
+        return;
+    }
+
+    const baseSlots = scheduleLLMGetBaseSlotsForChange(idx, type, prevValue);
+    let maxIndex = idx;
+    if (idx === 0) maxIndex = 3;
+    if (idx === 4) maxIndex = 7;
+    if (idx === 8) maxIndex = 9;
+    const result = timeUtils.computeShiftedSlots(baseSlots, idx, type, nextValue, { firstDuration: 45, maxIndex });
+    if (!result.ok) {
+        input.value = prevValue;
+        scheduleLLMUpdateTimeSettingsSummary();
+        scheduleLLMShowTimeSettingsError(result.message || '时间调整失败');
+        return;
+    }
+
+    const slots = result.slots;
+    const impacted = [];
+    for (let i = idx; i < slots.length && i <= maxIndex; i++) impacted.push(i);
+    scheduleLLMApplyTimeSlotsToInputs(slots, impacted);
+    scheduleLLMUpdateTimeInputsPrev(impacted);
+    scheduleLLMUpdateTimeSettingsSummary();
+}
+
+function scheduleLLMInitTimeInputHandlers() {
+    const inputs = document.querySelectorAll('input[type="time"][data-idx][data-type]');
+    const debounceMs = 2000;
+    const timers = new WeakMap();
+    inputs.forEach(input => {
+        input.dataset.prev = input.value || '';
+        input.addEventListener('input', (e) => {
+            const prevTimer = timers.get(input);
+            if (prevTimer) clearTimeout(prevTimer);
+            const timer = setTimeout(() => {
+                scheduleLLMHandleTimeInputChange(e, { force: false });
+            }, debounceMs);
+            timers.set(input, timer);
+        });
+        input.addEventListener('blur', (e) => {
+            const prevTimer = timers.get(input);
+            if (prevTimer) clearTimeout(prevTimer);
+            scheduleLLMHandleTimeInputChange(e, { force: true });
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const prevTimer = timers.get(input);
+                if (prevTimer) clearTimeout(prevTimer);
+                scheduleLLMHandleTimeInputChange(e, { force: true });
+            }
+        });
+    });
 }
 
 function initTimeSettingsCollapsible() {
