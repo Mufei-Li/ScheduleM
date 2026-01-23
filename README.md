@@ -1,6 +1,6 @@
-# ScheduleLLM - 智能课表生成工具
+# 析课 - 智能课表生成工具
 
-**ScheduleLLM** 是一个纯前端的 Web 应用程序，专为高校学生和教师设计。它能将复杂的 Excel 课程表文件解析为清晰、直观的月历视图，并支持导入到手机日历（iOS/Android）或打印为 PDF。
+**析课** 是一个混合架构的课表解析与生成工具：前端静态页 + Node.js 轻量代理 + Python PDF 解析微服务。支持 Excel/PDF 输入、LLM 智能识别、ICS 导出与打印。适用于高校学生与教师，将复杂课表“解压缩”为直观月历。
 
 ## 🌟 开发背景
 
@@ -8,125 +8,134 @@
 
 对于广大师生而言，每次提取并解读课表信息的过程，实质上都是一次非常耗费精力的“大脑解压缩”过程。由于信息密度巨大，传统的手动解读方式不仅效率低下，而且极其容易出错（例如记错周次、走错教室等）。因此，开发一个能够对“压缩课表”进行自动解析（解压缩）并还原为直观日程的程序工具，不仅能极大程度上解放大脑逻辑，更是提升校园生活和工作效率的一项刚需。
 
-## 📅 主要功能
+## ✨ 主要功能
+- 双模式解析：正则规则 + LLM 智能识别，支持乱序/非标准文本。
+- Excel/PDF 输入：Excel 表格上传；PDF 通过后端解析为结构化数据。
+- 月历视图：按月展示、颜色区分时段、周次提示。
+- 编辑与修正：在月历上直接修改课程信息。
+- 导出与打印：ICS 导出、离线 HTML、A4 打印优化。
+- 个性化节次：分段联动的时间微调（1-4、5-8、9-10）。
 
-### 1. 强大的双模式解析
-*   **传统正则解析**: 快速解析标准格式课程字符串，例如 `(1-2节)2-6周,8-12周(双)/一教A101/高等数学`。
-*   **LLM 智能识别 (新增)**: 集成阿里云通义千问 (Qwen) 等大语言模型，能够理解复杂的自然语言描述、非标格式或乱序文本，大幅提升解析成功率。支持自动重试与降级策略，确保稳定性。
-*   **自动容错**: 支持标准格式以及包含缺失字段的非标准格式，自动提取周次、地点和班级信息。
-*   **周次处理**: 完美支持单周、双周、非连续周（如 `2-6,8,10周`）的解析。
+## 🏗️ 系统架构
 
-### 2. 交互式月历与编辑
-*   **月度浏览**: 清晰展示每个月的课程安排。
-*   **详细展示**: 课程卡片显示上课地点、节次（支持连堂课显示，如 `1-2节`）。
-*   **时段区分**: 自动根据上课时间用不同颜色区分上午、下午和晚上课程。
-*   **周次标记**: 在每周一（或每月1号）自动通过小标签显示当前是“第几周”，不再迷路。
-*   **人工校正**: 支持直接在月历视图中点击课程名称或地点进行修改，方便修正解析错误。
+```mermaid
+flowchart LR
+  Browser["前端静态页"] -->|上传 Excel/PDF| Node["Node.js 轻量代理"]
+  Browser -->|直连可选| LLM["LLM 平台"]
+  Node -->|/api/llm| LLM
+  Node -->|/api/parse-pdf| Py["Python PDF 解析"]
+  Node -. /pdf.min.js .-> Browser
+```
 
-### 3. 多平台导出与分享
-*   **ICS 日历导出**:
-    *   **通用格式**: 适用于大多数日历应用。
-    *   **iOS (iPhone)**: 优化描述显示。
-    *   **Android (Google Calendar)**: 添加提醒设置。
-    *   **Windows (Outlook)**: 添加 Outlook 专用的分类和忙闲状态字段。
-*   **vCard/VCF 导出 (新增)**: 支持导出为 vCalendar 1.0 (.vcs) 格式，兼容旧版通讯录日程导入。
-*   **网页存档**: 一键导出为离线 `.html` 文件，保留所有样式和悬浮交互，方便在任何设备查看。
-*   **A4 打印优化**:
-    *   专门设计的打印样式（CSS `@media print`）。
-    *   自动生成所有有课月份的连续视图。
-    *   优化为 **A4 纵向 (Portrait)** 布局，自动分页，适合打印归档。
+- 前端：HTML/CSS/JS 负责 UI、解析流程与导出。
+- Node 代理：[server_debug.js](file:///Users/angli/Library/CloudStorage/OneDrive-个人/软著/ScheduleM/server_debug.js) 提供认证、限流、LLM 转发、PDF 解析与 PDF.js 资源托管。
+- Python 微服务：[main.py](file:///Users/angli/Library/CloudStorage/OneDrive-个人/软著/ScheduleM/pdfplumber-fastapi-service/main.py) 使用 pdfplumber 解析 PDF 表格，也支持 CLI 模式被 Node 调用。
 
-### 4. 个性化配置
-*   **开学时间**: 可自由设置学期第一周的周一日期，系统自动推算所有课程的具体日期。
-*   **节次微调**: 支持自定义每天 10 节课的具体开始和结束时间，调整第1节起止时间会联动平移第2-4节，调整第5节开始时间会联动平移第6-8节，调整第9节起止时间会联动平移第10节。
+## 🧩 模块说明
+- 前端入口：index.html、script.js、llm_parser.js、time_utils.js、style.css。
+- Node 服务：server_debug.js，提供 /api/llm、/api/parse-pdf、/api/auth/login/logout、/healthz。
+- Python 服务：pdfplumber-fastapi-service/ 目录，FastAPI + pdfplumber。
+
+## 🔄 数据流
+1. 用户上传 Excel 或 PDF。
+2. PDF 上传时由 Node 接收并调用 Python 解析。
+3. Excel/解析结果进入前端解析管线（规则 + LLM）。
+4. 前端生成课程日历与导出文件。
 
 ---
 
 ## 🚀 快速开始
 
-### 方式一：直接使用 (GitHub Pages)
-如果本项目已部署到 GitHub Pages，直接访问链接即可使用。
+### 方式一：直接使用
+如果已部署到静态站点（如 GitHub Pages），直接访问链接即可使用。但无法使用LLM调用。
 
-### 方式二：本地运行
-由于本项目是纯静态网页（HTML/CSS/JS），无需后端服务器。
-1.  下载本项目代码。
-2.  直接双击打开 `index.html` 文件即可在浏览器中运行。
+### 方式二：本地运行（全功能）
+1. 安装 Node.js 20+ 与 Python 3.10+。
+2. 在根目录创建 `.env`：
+   ```env
+   PORT=3001
+   REQUIRE_AUTH=true
+   AUTH_USER=admin
+   AUTH_PASS=请填入密码
+   JWT_SECRET=请填入随机密钥
+   LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+   LLM_API_KEY=sk-你的真实密钥
+   LLM_MODEL=qwen-flash
+   ALLOWED_ORIGINS=http://localhost:3001
+   ```
+3. 安装依赖并启动 Node：
+   ```bash
+   npm i
+   npm run start
+   ```
+4. （可选）独立启动 Python：
+   ```bash
+   cd pdfplumber-fastapi-service
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
+   python main.py
+   ```
+5. 打开 `http://localhost:3001/`。
+
+### 方式三：仅前端模式
+直接打开 `index.html`，可使用正则解析与本地编辑；LLM 需直连配置 API Key，PDF 解析不可用。
 
 ---
 
-## ⚙️ 开发者配置 (高级)
+## ⚙️ 配置说明
 
-为了方便开发者调试 LLM 功能，避免每次重复输入 API Key，本项目支持通过配置文件自动注入密钥。
+### 前端配置（可选）
+使用 `inject_env.js` 生成 `config.js`（已加入 .gitignore）：
+```bash
+LLM_API_URL=/api/llm LLM_MODEL=qwen-flash node inject_env.js
+```
+前端会读取 `window.AppConfig.llmApiUrl` 与 `model` 自动填充。
 
-### 1. 本地开发配置
-1.  复制 `config.template.js` 文件并重命名为 `config.js`。
-2.  编辑 `config.js`，填入你的阿里云 DashScope API Key：
-    ```javascript
-    window.AppConfig = {
-        apiKey: "sk-your-actual-key-here",
-        // ...
-    };
-    ```
-3.  刷新 `index.html`，系统将自动加载密钥并锁定输入框。
-    *   *注意：`config.js` 已被加入 `.gitignore`，请勿将含有真实密钥的文件提交到版本控制系统。*
+### Node 代理环境变量
+- PORT：服务端口，默认 3001。
+- REQUIRE_AUTH / REQUIRE_SAME_ORIGIN：是否开启鉴权/同源校验。
+- AUTH_USER / AUTH_PASS / JWT_SECRET / JWT_TTL_SECONDS：登录与 Cookie 鉴权配置。
+- LLM_BASE_URL / LLM_API_KEY / LLM_MODEL：LLM 转发配置。
+- ALLOWED_ORIGINS / RATE_LIMIT_RPM / MAX_BODY_BYTES：跨域与限流。
+- PDF_PARSER_PY / PYTHON_BIN / PDF_PARSE_TIMEOUT_MS：PDF 解析脚本与超时配置。
 
-### 2. CI/CD 自动部署
-在自动化部署环境中，可以通过环境变量生成配置文件：
-1.  设置环境变量 `API_KEY` (以及可选的 `LLM_BASE_URL`, `LLM_MODEL`)。
-2.  运行注入脚本：
-    ```bash
-    node inject_env.js
-    ```
-3.  该脚本会读取环境变量并生成 `config.js`，供前端页面调用。
+### Python 服务配置
+见 pdfplumber-fastapi-service/.env.example。
 
-### 3. GitHub Pages 环境配置
-1.  进入 GitHub 仓库 -> "Settings" -> "Secrets and variables" -> "Actions"。
-2.  点击 "New repository secret"，添加 `API_KEY` 秘密，值为你的阿里云 API Key。
-3.  创建 `.github/workflows/deploy.yml` 文件，添加以下内容：
-    ```yaml
-    name: Deploy to GitHub Pages
-    on:
-      push:
-        branches: [ main ]
-    jobs:
-      deploy:
-        runs-on: ubuntu-latest
-        permissions:
-          contents: write
-        steps:
-          - uses: actions/checkout@v4
-          - name: Set up Node.js
-            uses: actions/setup-node@v4
-            with:
-              node-version: '20'
-          - name: Generate config.js
-            run: node inject_env.js
-            env:
-              API_KEY: ${{ secrets.API_KEY }}
-          - name: Deploy to GitHub Pages
-            uses: peaceiris/actions-gh-pages@v4
-            with:
-              github_token: ${{ secrets.GITHUB_TOKEN }}
-              publish_dir: .
-    ```
+---
+
+## 🔌 API 文档
+- `POST /api/auth/login`：`{ username, password }` 登录，返回 Cookie。
+- `POST /api/auth/logout`：清除认证 Cookie。
+- `POST /api/llm`：转发 LLM 请求，参数 `{ model, messages, temperature }`。
+- `POST /api/parse-pdf`：表单上传 `file=*.pdf`，返回解析 JSON。
+- `GET /healthz`：健康检查。
+- `GET /pdf.min.js`、`/pdf.worker.min.js`：PDF.js 资源。
+
+## 🔌 API 文档
+- `POST /api/auth/login`：请求体 `{ username, password }`，登录成功后以 Cookie 方式下发令牌。
+- `POST /api/auth/logout`：清除认证 Cookie。
+- `POST /api/llm`：转发到 LLM 平台，参数 `{ model, messages, temperature }`。
+- `POST /api/parse-pdf`：表单上传 `file=*.pdf`，返回解析结果 JSON。
+- `GET /healthz`：健康检查。
+- `GET /pdf.min.js` 与 `GET /pdf.worker.min.js`：提供 PDF.js 资源（离线/内网场景）。
 
 ## 📖 使用指南
+1. 上传课表（Excel 或 PDF）。
+2. 设置开学日期与节次时间。
+3. 点击生成日程，查看月历与课程列表。
+4. 导出 ICS、打印或保存 HTML。
 
-1.  **上传课表**: 点击左侧边栏的 **"选择 Excel 课表"** 按钮，上传你的课程表文件。
-2.  **设置开学日期**: 在 **"开学第一周周一"** 处选择本学期的起始日期。
-3.  **生成日程**: 点击绿色 **"生成日程"** 按钮。右侧将显示解析出的月历。
-4.  **导出/打印**:
-    *   **保存网页**: 点击 **"保存为网页 (HTML)"** 可下载当前课表的精简网页版。此文件包含最完整的课程信息展示，且保留交互效果，是查看详情的最佳方式。
-    *   **打印**: 点击 **"打印月历"**，系统会自动调用浏览器打印预览（推荐选择 "另存为 PDF"）。*注意：由于打印页面布局限制，预览/打印时某些极长的课程信息可能会被部分截断。*
-    *   **导入手机**: 在下拉菜单中选择你的设备类型（如 iPhone），然后点击 **"导出 ICS 日历"**。
-        *   **iOS (iPhone) 用户建议**：将导出的 `.ics` 文件先发送到 MacBook 导入“日历”应用，然后通过 iCloud 自动同步到 iPhone，这样稳定性最高且能保留完整的提醒设置。也可以直接通过 AirDrop 或邮件发送到手机打开。
-
----
+## ✅ 测试
+```bash
+npm test
+```
 
 ## 🛠️ 技术栈
-*   **核心**: HTML5, CSS3, Vanilla JavaScript (ES6+)
-*   **Excel 处理**: [SheetJS (xlsx)](https://sheetjs.com/) Community Edition
-*   **字体**: Inter (Google Fonts)
+- 前端：HTML5 / CSS3 / Vanilla JS
+- 解析：SheetJS (xlsx)、pdfplumber
+- LLM：通义千问 Qwen（DashScope 兼容接口）
+- 后端：Node.js + FastAPI
 
 ## 📄 许可证
 本项目开源，仅供学习交流使用。
