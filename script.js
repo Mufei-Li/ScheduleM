@@ -1405,22 +1405,24 @@ function scheduleLLMSanitizePeriodRange(periodRange) {
     if (!parts.length) parts.push(s);
 
     const normParts = parts.map(part => {
-        const nums = String(part).match(/-?\d+/g);
-        if (!nums || nums.length === 0) return part;
-
         const toP = (n) => {
             const v = parseInt(n, 10);
             if (!Number.isFinite(v)) return 1;
             return v >= 1 ? v : 1;
         };
 
-        const a = toP(nums[0]);
-        if (nums.length >= 2) {
-            let b = toP(nums[1]);
-            if (b < a) b = a;
-            return a === b ? String(a) : `${a}-${b}`;
+        const mRange = String(part).match(/(\d+)\s*-\s*(\d+)/);
+        if (mRange) {
+            const a0 = toP(mRange[1]);
+            let b0 = toP(mRange[2]);
+            if (b0 < a0) b0 = a0;
+            return a0 === b0 ? String(a0) : `${a0}-${b0}`;
         }
-        return String(a);
+
+        const mSingle = String(part).match(/(\d+)/);
+        if (mSingle) return String(toP(mSingle[1]));
+
+        return part;
     });
 
     return normParts.join(',');
@@ -2614,63 +2616,74 @@ async function generateSchedule() {
 
             let periodNum = -1;
 
-            // Helper to parse "第一节", "二", "3", etc.
-            const parsePeriodCell = (cell) => {
-                if (!cell) return -1;
-                const s = String(cell).trim();
+            // Helper to parse "第一节", "二", "3", "1-2节" etc.
+            const parsePeriodCellInfo = (cell) => {
+                if (!cell) return null;
+                const s0 = String(cell).trim();
+                if (!s0) return null;
 
-                // 1. Check for explicit “第X节” / “X节”
+                const toP = (n) => {
+                    const v = parseInt(n, 10);
+                    if (!Number.isFinite(v)) return null;
+                    return v >= 1 ? v : 1;
+                };
+
+                const s = s0.replace(/[~～—–−]/g, '-');
+
+                const rangeMatch = s.match(/第?\s*(\d+)\s*-\s*(\d+)\s*节?/);
+                if (rangeMatch) {
+                    const a0 = toP(rangeMatch[1]);
+                    const b0 = toP(rangeMatch[2]);
+                    if (a0 === null || b0 === null) return null;
+                    return { start: a0, end: b0 >= a0 ? b0 : a0 };
+                }
+
                 const explicitMatch = s.match(/第?\s*(\d+)\s*节/);
                 if (explicitMatch) {
-                    const v = parseInt(explicitMatch[1], 10);
-                    if (!Number.isFinite(v)) return -1;
-                    return v >= 1 ? v : 1;
+                    const v = toP(explicitMatch[1]);
+                    if (v === null) return null;
+                    return { start: v, end: v };
                 }
 
-                // 2. Check for standard digits at beginning
                 const digitMatch = s.match(/^(\d+)/);
                 if (digitMatch) {
-                    const v = parseInt(digitMatch[1], 10);
-                    if (!Number.isFinite(v)) return -1;
-                    return v >= 1 ? v : 1;
+                    const v = toP(digitMatch[1]);
+                    if (v === null) return null;
+                    return { start: v, end: v };
                 }
 
-                // 2. Check for Chinese numerals
                 const cnNums = {
                     '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
                     '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
                     '十一': 11, '十二': 12
                 };
-
-                // Look for any key in string
                 for (const [k, v] of Object.entries(cnNums)) {
-                    if (s.includes(k)) return v;
+                    if (s.includes(k)) return { start: v, end: v };
                 }
 
-                return -1;
+                return null;
             };
-            
-            // Try to find period number from the first few columns
-            // Heuristic: Check first 3 columns for a valid period number
-            periodNum = -1;
+
+            let periodInfo = null;
             for (let c = 0; c < Math.min(row.length, 3); c++) {
-                const p = parsePeriodCell(row[c]);
-                if (p !== -1) {
-                    periodNum = p;
-                    break; // Found it
+                const info = parsePeriodCellInfo(row[c]);
+                if (info) {
+                    periodInfo = info;
+                    break;
                 }
             }
 
-            // Also check if the row is purely metadata (like "Lunch Break")
-            // If periodNum is still -1, verify if we should skip
-            if (periodNum === -1 || periodNum > 12) {
-                // Debug log for skipped rows if needed
-                // console.log(`Skipping row ${r} due to invalid period:`, row);
+            if (!periodInfo || !Number.isFinite(periodInfo.start) || periodInfo.start > 12) {
                 continue;
             }
 
-            const timeSlot = currentSlots[periodNum - 1];
-            if (!timeSlot) continue;
+            periodNum = periodInfo.start;
+            const periodEnd = Number.isFinite(periodInfo.end) ? periodInfo.end : periodNum;
+            const rowPeriodRange = periodEnd !== periodNum ? `${periodNum}-${periodEnd}` : String(periodNum);
+
+            const timeSlotStart = currentSlots[periodNum - 1];
+            const timeSlotEnd = currentSlots[periodEnd - 1] || timeSlotStart;
+            if (!timeSlotStart || !timeSlotEnd) continue;
 
             // Iterate Columns
             for (const [colIdx, dayIdx] of Object.entries(colToDayIdx)) {
@@ -2757,15 +2770,17 @@ async function generateSchedule() {
                         if (periodNum >= 5 && periodNum <= 8) timeOfDay = 'afternoon';
                         if (periodNum >= 9) timeOfDay = 'evening';
 
+                        const eventPeriodRange = course.periodRange ? String(course.periodRange) : rowPeriodRange;
+
                         events.push({
                             title: course.displayName,
                             rawTitle: course.rawName,
                             location: course.location,
                             className: course.className,
                             weeks: course.weeks, // Pass all weeks
-                            periodRange: course.periodRange, // Pass period info
-                            startTime: timeSlot.start, // HH:mm
-                            endTime: timeSlot.end,
+                            periodRange: eventPeriodRange, // Pass period info
+                            startTime: timeSlotStart.start, // HH:mm
+                            endTime: timeSlotEnd.end,
                             date: targetDate, // Date Object
                             week: weekNum,
                             period: periodNum,

@@ -256,22 +256,24 @@ class LLMService {
                 if (!parts.length) parts.push(s);
 
                 const normParts = parts.map(part => {
-                    const nums = String(part).match(/-?\d+/g);
-                    if (!nums || nums.length === 0) return part;
-
                     const toP = (n) => {
                         const v = parseInt(n, 10);
                         if (!Number.isFinite(v)) return 1;
                         return v >= 1 ? v : 1;
                     };
 
-                    const a = toP(nums[0]);
-                    if (nums.length >= 2) {
-                        let b = toP(nums[1]);
-                        if (b < a) b = a;
-                        return a === b ? String(a) : `${a}-${b}`;
+                    const mRange = String(part).match(/(\d+)\s*-\s*(\d+)/);
+                    if (mRange) {
+                        const a0 = toP(mRange[1]);
+                        let b0 = toP(mRange[2]);
+                        if (b0 < a0) b0 = a0;
+                        return a0 === b0 ? String(a0) : `${a0}-${b0}`;
                     }
-                    return String(a);
+
+                    const mSingle = String(part).match(/(\d+)/);
+                    if (mSingle) return String(toP(mSingle[1]));
+
+                    return part;
                 });
 
                 return normParts.join(',');

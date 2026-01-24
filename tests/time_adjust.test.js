@@ -48,4 +48,10 @@ overlapSlots[1] = { start: '09:00', end: '09:40' };
 const invalid = utils.validateSlots(overlapSlots);
 assert.ok(!invalid.ok);
 
+assert.strictEqual(utils.sanitizePeriodRange('1-2节'), '1-2');
+assert.strictEqual(utils.sanitizePeriodRange('3-4节'), '3-4');
+assert.strictEqual(utils.sanitizePeriodRange('第1节'), '1');
+assert.strictEqual(utils.sanitizePeriodRange('0-2节'), '1-2');
+assert.strictEqual(utils.sanitizePeriodRange('0-4节'), '1-4');
+
 console.log('time_adjust tests passed');

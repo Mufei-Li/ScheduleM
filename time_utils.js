@@ -148,6 +148,48 @@
         return { ok: true, slots };
     };
 
+    const sanitizePeriodRange = (periodRange) => {
+        if (!periodRange) return '';
+
+        const raw = String(periodRange).trim();
+        if (!raw) return '';
+
+        let s = raw
+            .replace(/[（(]/g, '')
+            .replace(/[）)]/g, '')
+            .replace(/[节课]/g, '')
+            .replace(/第/g, '')
+            .replace(/[~～—–−]/g, '-')
+            .replace(/至/g, '-')
+            .replace(/[，、;；]/g, ',');
+
+        const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+        if (!parts.length) parts.push(s);
+
+        const toP = (n) => {
+            const v = parseInt(n, 10);
+            if (!Number.isFinite(v)) return 1;
+            return v >= 1 ? v : 1;
+        };
+
+        const normParts = parts.map(part => {
+            const mRange = String(part).match(/(\d+)\s*-\s*(\d+)/);
+            if (mRange) {
+                const a0 = toP(mRange[1]);
+                let b0 = toP(mRange[2]);
+                if (b0 < a0) b0 = a0;
+                return a0 === b0 ? String(a0) : `${a0}-${b0}`;
+            }
+
+            const mSingle = String(part).match(/(\d+)/);
+            if (mSingle) return String(toP(mSingle[1]));
+
+            return part;
+        });
+
+        return normParts.join(',');
+    };
+
     const api = {
         isValidTime,
         parseTimeToMinutes,
@@ -156,7 +198,8 @@
         diffTimeMinutes,
         shiftSlots,
         validateSlots,
-        computeShiftedSlots
+        computeShiftedSlots,
+        sanitizePeriodRange
     };
 
     if (typeof window !== 'undefined') {
