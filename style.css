@@ -768,6 +768,28 @@ input[type="time"] {
     font-weight: 600;
 }
 
+.llm-recognized-summary-label.has-ai-warning {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    line-height: 1.15;
+}
+
+.llm-recognized-ai-warning {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #92400e;
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.llm-recognized-ai-warning.is-visible {
+    opacity: 0.95;
+    transform: translateY(0);
+}
+
 .llm-recognized-body {
     padding: 10px 12px;
     display: grid;
@@ -1047,6 +1069,46 @@ input[type="time"] {
 
 .placeholder-text.placeholder-fade-out {
     opacity: 0;
+}
+
+.placeholder-text.placeholder-swap {
+    transition: none;
+    opacity: 0;
+}
+
+.placeholder-text.placeholder-ai-warning {
+    color: #92400e;
+    font-weight: 700;
+}
+
+.schedulellm-calendar-ai-warning {
+    position: sticky;
+    top: 10px;
+    z-index: 46;
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.9rem;
+    font-weight: 700;
+    box-shadow: var(--shadow-sm);
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.schedulellm-calendar-ai-warning.is-visible {
+    opacity: 0.98;
+    transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .llm-recognized-ai-warning,
+    .schedulellm-calendar-ai-warning {
+        transition: none;
+    }
 }
 
 .schedulellm-calendar-status {

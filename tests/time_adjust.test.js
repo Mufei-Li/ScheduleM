@@ -54,4 +54,9 @@ assert.strictEqual(utils.sanitizePeriodRange('第1节'), '1');
 assert.strictEqual(utils.sanitizePeriodRange('0-2节'), '1-2');
 assert.strictEqual(utils.sanitizePeriodRange('0-4节'), '1-4');
 
+assert.deepStrictEqual(utils.parseWeekString('(1-2节)2-6周,8-12周(双)'), [2, 3, 4, 5, 6, 8, 10, 12]);
+assert.deepStrictEqual(utils.parseWeekString('8-12周(XX)'), [8, 10, 12]);
+assert.deepStrictEqual(utils.parseWeekString('1-16周(旦)'), [1, 3, 5, 7, 9, 11, 13, 15]);
+assert.deepStrictEqual(utils.parseWeekString('2-16周(对)'), [2, 4, 6, 8, 10, 12, 14, 16]);
+
 console.log('time_adjust tests passed');

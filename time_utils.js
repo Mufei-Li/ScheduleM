@@ -190,6 +190,139 @@
         return normParts.join(',');
     };
 
+    const normalizeOCRText = (str) => {
+        if (!str) return '';
+        return String(str)
+            .replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 65248))
+            .replace(/[Ａ-Ｚａ-ｚ]/g, s => String.fromCharCode(s.charCodeAt(0) - 65248))
+            .replace(/（/g, '(').replace(/）/g, ')')
+            .replace(/：/g, ':')
+            .replace(/[—－]/g, '-')
+            .replace(/[~～—–−]/g, '-')
+            .replace(/(\d+)\s*[\n\r]*[-~～]\s*[\n\r]*\s*(\d+)/g, '$1-$2')
+            .replace(/(\d+)\s*[\n\r]+\s*(\d+)/g, '$1$2')
+            .trim();
+    };
+
+    const editDistance = (a, b) => {
+        const s = String(a == null ? '' : a);
+        const t = String(b == null ? '' : b);
+        const n = s.length;
+        const m = t.length;
+        if (n === 0) return m;
+        if (m === 0) return n;
+
+        const dp = new Array(m + 1);
+        for (let j = 0; j <= m; j++) dp[j] = j;
+
+        for (let i = 1; i <= n; i++) {
+            let prev = dp[0];
+            dp[0] = i;
+            for (let j = 1; j <= m; j++) {
+                const tmp = dp[j];
+                const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+                dp[j] = Math.min(
+                    dp[j] + 1,
+                    dp[j - 1] + 1,
+                    prev + cost
+                );
+                prev = tmp;
+            }
+        }
+        return dp[m];
+    };
+
+    const normalizeWeekParityToken = (raw) => {
+        const t0 = String(raw || '').replace(/[()（）\s]/g, '');
+        if (!t0) return null;
+
+        if (/[单双]/.test(t0)) return t0.includes('双') ? '双' : '单';
+        if (/奇/.test(t0)) return '单';
+        if (/偶/.test(t0)) return '双';
+
+        if (/^(?:单周|奇周)$/i.test(t0)) return '单';
+        if (/^(?:双周|偶周)$/i.test(t0)) return '双';
+
+        if (/^[1一I|l]+$/.test(t0)) return '单';
+        if (/^[2二Zz]+$/.test(t0)) return '双';
+
+        if (t0 === '旦' || t0 === '早' || t0 === '甲') return '单';
+        if (t0 === '又' || t0 === '叉' || t0 === '对') return '双';
+
+        if (/^[xX×✕✖]{2,}$/.test(t0)) return '双';
+        if (t0 === 'XX' || t0 === 'xx') return '双';
+
+        if (/^[单双奇偶旦又叉对甲早xX×✕✖1I|l一二2Zz]{1,4}$/.test(t0)) {
+            const candidates = [
+                { k: '单', v: '单' },
+                { k: '双', v: '双' },
+                { k: '奇', v: '单' },
+                { k: '偶', v: '双' },
+                { k: '单周', v: '单' },
+                { k: '双周', v: '双' },
+                { k: '奇周', v: '单' },
+                { k: '偶周', v: '双' }
+            ];
+            let best = null;
+            for (const c of candidates) {
+                const d = editDistance(t0, c.k);
+                if (!best || d < best.d) best = { d, v: c.v };
+            }
+            if (best && best.d <= 1) return best.v;
+        }
+
+        return null;
+    };
+
+    const parseWeekString = (str, opts) => {
+        if (!str) return [];
+
+        const maxWeek = (opts && Number.isFinite(opts.maxWeek)) ? Number(opts.maxWeek) : 30;
+
+        let cleanStr = normalizeOCRText(str);
+        cleanStr = cleanStr.replace(/\([^)]*节\)/g, '');
+
+        cleanStr = cleanStr
+            .replace(/(\d+(?:\s*[-~～—–−]\s*\d+)?)\s*周\s*([^\d,，()（）\s]{1,4})(?=[,，\s]|$)/g, '$1周($2)')
+            .replace(/(\d+(?:\s*[-~～—–−]\s*\d+)?)\s*周\s*(单|双)(?=[,，\s]|$)/g, '$1周($2)')
+            .replace(/(\d+(?:\s*[-~～—–−]\s*\d+)?)\s*(单周|双周|奇周|偶周)(?=[,，\s]|$)/g, (_, a, b) => {
+                const p = normalizeWeekParityToken(b);
+                return p ? `${a}周(${p})` : `${a}周`;
+            });
+
+        const parts = cleanStr.split(/[,，]/);
+        const weekSet = new Set();
+
+        for (const part0 of parts) {
+            const part = String(part0 || '');
+            const weekRe = /(\d+)(?:\s*[-~～—–−]\s*(\d+))?(?:周|W|w)?(?:\s*[\(（]\s*([^\)）]{1,8})\s*[\)）])?/g;
+            let match;
+            while ((match = weekRe.exec(part)) !== null) {
+                if (!match[0]) continue;
+
+                const token = match[0];
+                const hasWeekMark = /[周Ww]/.test(token);
+                const hasRange = !!match[2];
+                if (!hasWeekMark && !hasRange) continue;
+
+                const start = parseInt(match[1], 10);
+                const end = match[2] ? parseInt(match[2], 10) : start;
+                if (!Number.isFinite(start) || start <= 0 || start > maxWeek) continue;
+                if (!Number.isFinite(end) || end <= 0 || end > maxWeek) continue;
+
+                const parity = normalizeWeekParityToken(match[3]);
+
+                for (let i = start; i <= end; i++) {
+                    if (parity === '单' && i % 2 === 0) continue;
+                    if (parity === '双' && i % 2 !== 0) continue;
+                    weekSet.add(i);
+                }
+            }
+        }
+
+        return Array.from(weekSet).sort((a, b) => a - b);
+    };
+
     const api = {
         isValidTime,
         parseTimeToMinutes,
@@ -199,7 +332,9 @@
         shiftSlots,
         validateSlots,
         computeShiftedSlots,
-        sanitizePeriodRange
+        sanitizePeriodRange,
+        normalizeWeekParityToken,
+        parseWeekString
     };
 
     if (typeof window !== 'undefined') {

@@ -1727,6 +1727,11 @@ function standardizeLocation(loc) {
     // 3. Remove ALL whitespace to ensure clean parsing
     s = s.replace(/\s+/g, "");
 
+    s = s.replace(/一般(?=[A-Za-z]?\d)/g, "一教");
+    s = s.replace(/二般(?=[A-Za-z]?\d)/g, "二教");
+    s = s.replace(/一(?:栋|棟)(?=[A-Za-z]?\d)/g, "一教");
+    s = s.replace(/二(?:栋|棟)(?=[A-Za-z]?\d)/g, "二教");
+
     // 4. Split Building and Room
     const buildingSuffixes = "楼|教|馆|室|厅|部|大楼|场|苑|中心|程|基地";
 
@@ -1835,13 +1840,22 @@ function simplifyLocation(loc) {
 }
 
 function parseWeekString(str) {
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    if (utils && typeof utils.parseWeekString === 'function') {
+        return utils.parseWeekString(str);
+    }
+
     // Example: "(1-2节)2-6周,8-12周(双)"
     // Or just "2-6周"
     // Normalize first
     let cleanStr = normalizeOCRText(str);
-    
+
     // Remove anything inside parens that looks like period "1-2节"
     cleanStr = cleanStr.replace(/\([^)]*节\)/g, "");
+
+    cleanStr = cleanStr
+        .replace(/(\d+(?:-\d+)?)\s*周\s*(单|双)(?=[,，\s]|$)/g, '$1周($2)')
+        .replace(/(\d+(?:-\d+)?)\s*(单周|双周)(?=[,，\s]|$)/g, (_, a, b) => `${a}周(${b === '单周' ? '单' : '双'})`);
 
     // Logic: Split by comma
     const parts = cleanStr.split(/[,，]/); // Handle Chinese comma too
@@ -2147,6 +2161,8 @@ function scheduleLLMOnCalendarRendered(useLLM) {
         return;
     }
     scheduleLLMResetLayoutMode();
+    scheduleLLMHideAiWarningInCalendarArea();
+    scheduleLLMShowAiWarningInRecognizedTitle();
 }
 
 function scheduleLLMFormatCourseTime(c) {
@@ -2289,6 +2305,9 @@ function scheduleLLMOnCalendarRendered(useLLM) {
         els.panel.open = true;
     }
 
+    const shown = scheduleLLMShowAiWarningInRecognizedTitle();
+    if (shown) scheduleLLMHideAiWarningInCalendarArea();
+
     // Fade out progress host
     if (els.host) {
         els.host.classList.add('fade-out');
@@ -2324,6 +2343,124 @@ function scheduleLLMHideHintOnGenerate() {
     el.classList.add('llm-hint-fade-out');
 }
 
+const SCHEDULELLM_AI_WARNING_TEXT = 'AI识别可能有错误！月历生成后请核对。';
+
+function scheduleLLMClearAiWarningInRecognizedTitle() {
+    const label = document.getElementById('llmRecognizedLabel');
+    if (!label) return;
+
+    const warn = label.querySelector('.llm-recognized-ai-warning');
+    if (warn && warn.parentElement) warn.parentElement.removeChild(warn);
+    label.classList.remove('has-ai-warning');
+}
+
+function scheduleLLMShowAiWarningInRecognizedTitle() {
+    const label = document.getElementById('llmRecognizedLabel');
+    if (!label) return false;
+
+    if (label.textContent !== '已识别课程') {
+        label.textContent = '已识别课程';
+    }
+
+    let warn = label.querySelector('.llm-recognized-ai-warning');
+    if (!warn) {
+        warn = document.createElement('span');
+        warn.className = 'llm-recognized-ai-warning';
+        label.appendChild(warn);
+    }
+
+    warn.textContent = `(${SCHEDULELLM_AI_WARNING_TEXT})`;
+    label.classList.add('has-ai-warning');
+
+    const reduce = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+        warn.classList.add('is-visible');
+        return true;
+    }
+
+    warn.classList.remove('is-visible');
+    window.requestAnimationFrame(() => {
+        warn.classList.add('is-visible');
+    });
+
+    return true;
+}
+
+function scheduleLLMHideAiWarningInCalendarArea() {
+    const calendarArea = document.getElementById('calendarArea');
+    if (!calendarArea) return;
+
+    const banner = calendarArea.querySelector('.schedulellm-calendar-ai-warning');
+    if (banner && banner.parentElement) {
+        banner.classList.remove('is-visible');
+        const reduce = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduce) {
+            banner.parentElement.removeChild(banner);
+            return;
+        }
+        window.setTimeout(() => {
+            if (banner.parentElement) banner.parentElement.removeChild(banner);
+        }, 240);
+    }
+
+    const placeholder = calendarArea.querySelector('.placeholder-text');
+    if (placeholder) {
+        placeholder.classList.remove('placeholder-ai-warning');
+        placeholder.classList.remove('placeholder-swap');
+    }
+}
+
+function scheduleLLMShowAiWarningInCalendarArea() {
+    const calendarArea = document.getElementById('calendarArea');
+    if (!calendarArea) return;
+
+    const placeholder = calendarArea.querySelector('.placeholder-text');
+    if (placeholder) {
+        const reduce = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduce) {
+            placeholder.textContent = SCHEDULELLM_AI_WARNING_TEXT;
+            placeholder.classList.add('status-updated');
+            placeholder.classList.add('placeholder-ai-warning');
+            placeholder.classList.remove('placeholder-uploaded');
+            placeholder.classList.remove('placeholder-fade-out');
+            return;
+        }
+
+        placeholder.classList.add('placeholder-swap');
+        placeholder.textContent = SCHEDULELLM_AI_WARNING_TEXT;
+        placeholder.classList.add('status-updated');
+        placeholder.classList.add('placeholder-ai-warning');
+        placeholder.classList.remove('placeholder-uploaded');
+        placeholder.classList.remove('placeholder-fade-out');
+
+        window.requestAnimationFrame(() => {
+            placeholder.classList.remove('placeholder-swap');
+        });
+        return;
+    }
+
+    let banner = calendarArea.querySelector('.schedulellm-calendar-ai-warning');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.className = 'schedulellm-calendar-ai-warning no-print';
+        banner.setAttribute('role', 'status');
+        calendarArea.prepend(banner);
+    }
+
+    banner.textContent = SCHEDULELLM_AI_WARNING_TEXT;
+
+    const reduce = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+        banner.classList.add('is-visible');
+        return;
+    }
+
+    banner.classList.remove('is-visible');
+    window.requestAnimationFrame(() => {
+        banner.classList.add('is-visible');
+    });
+}
+
 let generatedEvents = [];
 let currentCalendarDate = new Date();
 let scheduleLLMMinMonth = null;
@@ -2338,6 +2475,8 @@ async function generateSchedule() {
         }
 
         scheduleLLMHideHintOnGenerate();
+        scheduleLLMClearAiWarningInRecognizedTitle();
+        scheduleLLMShowAiWarningInCalendarArea();
 
         const btnGen = document.getElementById('btnGenerate');
         const originalBtnText = btnGen.textContent;
@@ -2396,11 +2535,16 @@ async function generateSchedule() {
             rawScheduleData.forEach(row => {
                 row.forEach(cell => {
                     if (cell && typeof cell === 'string' && cell.trim()) {
-                        // Apply normalizeOCRText BEFORE sending to LLM or Regex
-                        // This ensures LLM sees "4-15" instead of "4\n15"
                         const val = canonicalizeLLMCellKey(cell);
-                        
-                        // Skip if matches any ignore pattern
+
+                        const m = val.match(/^\s*(?:星期|周)\s*[一二三四五六日天][\s\n]*(.+)$/);
+                        if (m && m[1]) {
+                            const rest = String(m[1]).trim();
+                            if (rest && !ignorePatterns.some(p => p.test(rest))) {
+                                uniqueCells.add(rest);
+                            }
+                        }
+
                         if (ignorePatterns.some(p => p.test(val))) {
                             return;
                         }
@@ -2580,6 +2724,18 @@ async function generateSchedule() {
         }
 
         const headerRow = rawScheduleData[headerRowIdx];
+        const headerEmbeddedCourses = {};
+        headerRow.forEach((cell, idx) => {
+            if (!cell || typeof cell !== 'string') return;
+            const s0 = String(cell);
+            const m = s0.match(/^\s*((?:星期|周)\s*[一二三四五六日天])[\s\n]+([\s\S]+)$/);
+            if (!m) return;
+            const day = String(m[1]).replace(/\s+/g, '');
+            const rest = String(m[2] || '').trim();
+            headerRow[idx] = day;
+            if (rest) headerEmbeddedCourses[idx] = rest;
+        });
+
         const colToDayIdx = {}; // col -> 1(Mon)..7(Sun)
         headerRow.forEach((cell, idx) => {
             if (!cell || typeof cell !== 'string') return;
@@ -2610,59 +2766,73 @@ async function generateSchedule() {
             }
         }
 
+        const rowsToIterate = [];
+        const embeddedKeys = Object.keys(headerEmbeddedCourses);
+        if (embeddedKeys.length > 0) {
+            const syntheticRow = new Array(headerRow.length).fill('');
+            syntheticRow[1] = headerRow[1];
+            for (const k of embeddedKeys) {
+                syntheticRow[Number(k)] = headerEmbeddedCourses[k];
+            }
+            rowsToIterate.push(syntheticRow);
+        }
         for (let r = headerRowIdx + 1; r < rawScheduleData.length; r++) {
             const row = rawScheduleData[r];
             if (!row || row.length === 0) continue;
+            rowsToIterate.push(row);
+        }
+
+        const parsePeriodCellInfo = (cell) => {
+            if (!cell) return null;
+            const s0 = String(cell).trim();
+            if (!s0) return null;
+
+            const toP = (n) => {
+                const v = parseInt(n, 10);
+                if (!Number.isFinite(v)) return null;
+                return v >= 1 ? v : 1;
+            };
+
+            const s = s0.replace(/[~～—–−]/g, '-');
+
+            const rangeMatch = s.match(/第?\s*(\d+)\s*-\s*(\d+)\s*节?/);
+            if (rangeMatch) {
+                const a0 = toP(rangeMatch[1]);
+                const b0 = toP(rangeMatch[2]);
+                if (a0 === null || b0 === null) return null;
+                return { start: a0, end: b0 >= a0 ? b0 : a0 };
+            }
+
+            const explicitMatch = s.match(/第?\s*(\d+)\s*节/);
+            if (explicitMatch) {
+                const v = toP(explicitMatch[1]);
+                if (v === null) return null;
+                return { start: v, end: v };
+            }
+
+            const digitMatch = s.match(/^(\d+)/);
+            if (digitMatch) {
+                const v = toP(digitMatch[1]);
+                if (v === null) return null;
+                return { start: v, end: v };
+            }
+
+            const cnNums = {
+                '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+                '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+                '十一': 11, '十二': 12
+            };
+            for (const [k, v] of Object.entries(cnNums)) {
+                if (s.includes(k)) return { start: v, end: v };
+            }
+
+            return null;
+        };
+
+        for (const row of rowsToIterate) {
+            if (!row || row.length === 0) continue;
 
             let periodNum = -1;
-
-            // Helper to parse "第一节", "二", "3", "1-2节" etc.
-            const parsePeriodCellInfo = (cell) => {
-                if (!cell) return null;
-                const s0 = String(cell).trim();
-                if (!s0) return null;
-
-                const toP = (n) => {
-                    const v = parseInt(n, 10);
-                    if (!Number.isFinite(v)) return null;
-                    return v >= 1 ? v : 1;
-                };
-
-                const s = s0.replace(/[~～—–−]/g, '-');
-
-                const rangeMatch = s.match(/第?\s*(\d+)\s*-\s*(\d+)\s*节?/);
-                if (rangeMatch) {
-                    const a0 = toP(rangeMatch[1]);
-                    const b0 = toP(rangeMatch[2]);
-                    if (a0 === null || b0 === null) return null;
-                    return { start: a0, end: b0 >= a0 ? b0 : a0 };
-                }
-
-                const explicitMatch = s.match(/第?\s*(\d+)\s*节/);
-                if (explicitMatch) {
-                    const v = toP(explicitMatch[1]);
-                    if (v === null) return null;
-                    return { start: v, end: v };
-                }
-
-                const digitMatch = s.match(/^(\d+)/);
-                if (digitMatch) {
-                    const v = toP(digitMatch[1]);
-                    if (v === null) return null;
-                    return { start: v, end: v };
-                }
-
-                const cnNums = {
-                    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-                    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-                    '十一': 11, '十二': 12
-                };
-                for (const [k, v] of Object.entries(cnNums)) {
-                    if (s.includes(k)) return { start: v, end: v };
-                }
-
-                return null;
-            };
 
             let periodInfo = null;
             for (let c = 0; c < Math.min(row.length, 3); c++) {
@@ -2808,6 +2978,11 @@ async function generateSchedule() {
         }
 
         renderCalendar(events);
+
+        if (events.length > 0) {
+            scheduleLLMHideAiWarningInCalendarArea();
+            scheduleLLMShowAiWarningInRecognizedTitle();
+        }
 
         if (typeof scheduleLLMOnCalendarRendered === 'function') {
             scheduleLLMOnCalendarRendered(useLLM && events.length > 0);
