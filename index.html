@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="style.css">
     <!-- SheetJS for Excel processing -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 
@@ -23,7 +22,7 @@
 
             <div class="config-group">
                 <label class="btn-primary">
-                    选择课表文件（Excel/图片/PDF）
+                    选择课表文件（Excel/PDF/图片）
                     <input type="file" id="fileUpload" accept=".xlsx,.xls,.png,.jpg,.jpeg,.pdf" hidden>
                 </label>
                 <p id="fileName" class="status-text">未选择文件</p>
@@ -150,7 +149,8 @@
             </div>
 
             <div id="calendarArea" class="calendar-container">
-                <div class="placeholder-text">请上传课表并生成月历</div>
+                <div class="placeholder-text">请上传课表成功后点击左侧栏按钮生成月历</div>
+                <div class="placeholder-hint">建议上传Excel或可编辑版PDF文件，扫描版PDF及图片识别效果可能受限。</div>
             </div>
 
             <section id="courseListPanel" class="course-list-panel no-print" aria-label="课程列表">

@@ -46,6 +46,7 @@ const JWT_TTL_SECONDS = Number(env('JWT_TTL_SECONDS', '43200'));
 
 const RATE_LIMIT_RPM = Number(env('RATE_LIMIT_RPM', '120'));
 const MAX_BODY_BYTES = Number(env('MAX_BODY_BYTES', '1048576'));
+const MAX_LLM_BODY_BYTES = Number(env('MAX_LLM_BODY_BYTES', '12582912'));
 const ALLOWED_ORIGINS = String(env('ALLOWED_ORIGINS', '')).split(',').map(s => s.trim()).filter(Boolean);
 
 const COOKIE_NAME = String(env('AUTH_COOKIE_NAME', 'schedulellm_token'));
@@ -723,7 +724,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && path === '/api/auth/login') {
-      const { json } = await readJson(req, MAX_BODY_BYTES);
+      const { json } = await readJson(req, MAX_LLM_BODY_BYTES);
       const user = String(json?.username || '');
       const pass = String(json?.password || '');
 
@@ -914,6 +915,8 @@ server.listen(PORT, '0.0.0.0', () => {
     msg: 'server_listening',
     port: PORT,
     llmBaseUrl: LLM_BASE_URL,
-    requireAuth: REQUIRE_AUTH
+    requireAuth: REQUIRE_AUTH,
+    pythonBin: PYTHON_BIN,
+    pdfParserPy: PDF_PARSER_PY
   }) + '\n');
 });

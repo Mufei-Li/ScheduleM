@@ -236,6 +236,47 @@ class LLMService {
                 .replace(/[\s]+/g, '')
                 .trim();
 
+            const sanitizePeriodRange = (periodRange) => {
+                if (!periodRange) return '';
+
+                const raw = String(periodRange).trim();
+                if (!raw) return '';
+
+                // 修正 OCR/LLM 可能输出的“第0节/0-2节”等无效节次：节次编号强制从 1 开始
+                let s = raw
+                    .replace(/[（(]/g, '')
+                    .replace(/[）)]/g, '')
+                    .replace(/[节课]/g, '')
+                    .replace(/第/g, '')
+                    .replace(/[~～—–−]/g, '-')
+                    .replace(/至/g, '-')
+                    .replace(/[，、;；]/g, ',');
+
+                const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+                if (!parts.length) parts.push(s);
+
+                const normParts = parts.map(part => {
+                    const nums = String(part).match(/-?\d+/g);
+                    if (!nums || nums.length === 0) return part;
+
+                    const toP = (n) => {
+                        const v = parseInt(n, 10);
+                        if (!Number.isFinite(v)) return 1;
+                        return v >= 1 ? v : 1;
+                    };
+
+                    const a = toP(nums[0]);
+                    if (nums.length >= 2) {
+                        let b = toP(nums[1]);
+                        if (b < a) b = a;
+                        return a === b ? String(a) : `${a}-${b}`;
+                    }
+                    return String(a);
+                });
+
+                return normParts.join(',');
+            };
+
             result.courses.forEach(course => {
                 if (course.raw_weeks) {
                     const calculatedWeeks = this.parseWeekString(course.raw_weeks);
@@ -296,6 +337,15 @@ class LLMService {
                         if (before !== after) {
                             if (debug) console.debug('field_fix', { field: 'teacher', before, after });
                             course.teacher = after;
+                        }
+                    }
+
+                    if (typeof course.periodRange === 'string') {
+                        const before = course.periodRange;
+                        const after = sanitizePeriodRange(before);
+                        if (before !== after) {
+                            if (debug) console.debug('field_fix', { field: 'periodRange', before, after });
+                            course.periodRange = after;
                         }
                     }
 
@@ -406,6 +456,140 @@ class LLMService {
                 confidence: 0,
                 error: error.message
             };
+        }
+    }
+
+    async parseScheduleImageToGrid(imageDataUrl, opts = {}) {
+        const debug = this._debugEnabled();
+        const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+        const url0 = String(imageDataUrl || '');
+        if (!/^data:image\//i.test(url0)) {
+            return { grid: [], confidence: 0, error: 'not_image_data_url' };
+        }
+
+        const base = (this.config.baseUrl || '').replace(/\/$/, '');
+        const isProxy = /\/api\/llm\/?$/.test(base);
+        const url = isProxy ? base.replace(/\/$/, '') : `${base}/chat/completions`;
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (!isProxy) {
+            headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+        } else if (this.config.apiKey) {
+            headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+        }
+
+        if (isProxy) {
+            headers['X-Timestamp'] = String(Date.now());
+            const makeNonce = () => {
+                if (typeof crypto !== 'undefined' && crypto && crypto.randomUUID) return crypto.randomUUID();
+                if (typeof crypto !== 'undefined' && crypto && crypto.getRandomValues) {
+                    const b = new Uint8Array(16);
+                    crypto.getRandomValues(b);
+                    b[6] = (b[6] & 0x0f) | 0x40;
+                    b[8] = (b[8] & 0x3f) | 0x80;
+                    const hex = Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+                    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+                }
+                return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            };
+            headers['X-Nonce'] = makeNonce();
+        }
+
+        const model0 = String(this.config.model || '').trim();
+        const model = (/vl/i.test(model0) ? model0 : 'qwen-vl-plus');
+
+        const system = `你是“课程表图片→二维表格 JSON”结构化提取助手。你的目标不是解释课程含义，而是稳定、完整地把图片中的课程表还原为二维表格。\n\n只输出一个 JSON：{\"grid\": string[][], \"confidence\": number}。不要输出 Markdown，不要输出解释文字。\n\n预处理（在脑内执行）：\n1) 纠正旋转/倒置；2) 透视/梯形校正；3) 去噪与对比增强，弱化底纹/水印/阴影；4) 优先读取表格线框内文本，忽略表格外无关说明。\n\n结构还原（强约束）：\n1) 先定位星期表头行（含“星期一/周一”等），作为 grid[0]。\n2) 以列对齐星期（尽量覆盖 周一..周日/周天），不要串列。\n3) 以行对齐节次：每行前 1~3 列必须能读出数字节次（1-12），例如“第1节/1/一/01”。\n4) 单元格内合并：按阅读顺序从上到下合并，用 \\n 连接；若同格多门课，用 \\n\\n 分隔不同课程块；严禁把相邻格文字合并。\n5) 空白单元格用 \"\"；尽量让所有行列长度一致，不足用 \"\" 补齐。\n6) 允许最小纠错：全角/半角统一、去多余空格、修复 O/0、l/1、—/- 等明显混淆；禁止编造不存在的课程/地点。`;
+
+        const payload = {
+            model,
+            messages: [
+                { role: 'system', content: system },
+                {
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: '请识别并输出该课程表图片的 grid。' },
+                        { type: 'image_url', image_url: { url: url0 } }
+                    ]
+                }
+            ],
+            temperature: 0
+        };
+
+        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const timeoutMs = Number(opts && opts.timeoutMs ? opts.timeoutMs : 0) || 0;
+        let timer = null;
+        if (controller && timeoutMs > 0) {
+            timer = setTimeout(() => {
+                try { controller.abort(); } catch (_) { }
+            }, timeoutMs);
+        }
+
+        try {
+            if (debug) {
+                console.groupCollapsed(`[LLM][image_grid_request] model=${model}`);
+                console.debug('baseUrl', base);
+                console.debug('image', { len: url0.length });
+            }
+
+            const fetchOptions = {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(payload)
+            };
+            if (isProxy) fetchOptions.credentials = 'include';
+            if (controller) fetchOptions.signal = controller.signal;
+
+            const resp = await fetch(url, fetchOptions);
+            const data = await resp.json().catch(() => null);
+            if (!resp.ok) {
+                const msg = data ? JSON.stringify(data) : '';
+                throw new Error(`API Error: ${resp.status} - ${msg}`);
+            }
+
+            const rawAssistant = (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content)
+                ? data.choices[0].message.content
+                : '';
+            const content = String(rawAssistant).trim()
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/```\s*$/i, '');
+
+            let obj;
+            try { obj = JSON.parse(content); } catch {
+                if (debug) console.debug('json_parse_failed', this._clip(content, 4000));
+                throw new Error('invalid_json');
+            }
+
+            const grid0 = obj && Array.isArray(obj.grid) ? obj.grid : null;
+            if (!Array.isArray(grid0) || !grid0.every(r => Array.isArray(r))) throw new Error('bad_image_grid');
+
+            const grid = grid0.map(r => (r || []).map(c => (c == null ? '' : String(c))));
+            const maxCols = grid.reduce((m, r) => Math.max(m, (r ? r.length : 0)), 0);
+            const norm = grid.map(r => {
+                const rr = Array.isArray(r) ? r.slice(0, maxCols) : [];
+                while (rr.length < maxCols) rr.push('');
+                return rr;
+            });
+
+            const confidence = (obj && typeof obj.confidence === 'number') ? obj.confidence : 0.75;
+
+            if (debug) {
+                const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                console.debug('result', { rows: norm.length, cols: maxCols, confidence, ms: +(t1 - t0).toFixed(1) });
+                console.groupEnd();
+            }
+
+            return { grid: norm, confidence, error: null };
+        } catch (e) {
+            if (debug) {
+                const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                console.debug('error', { message: e && e.message ? e.message : String(e), ms: +(t1 - t0).toFixed(1) });
+                console.groupEnd();
+            }
+            return { grid: [], confidence: 0, error: e && e.message ? e.message : String(e) };
+        } finally {
+            if (timer) clearTimeout(timer);
         }
     }
 

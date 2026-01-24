@@ -745,6 +745,37 @@ function scheduleLLMReadAsDataURL(file) {
     });
 }
 
+function scheduleLLMLoadImageFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('image_decode_failed'));
+        img.src = dataUrl;
+    });
+}
+
+async function scheduleLLMPackImageDataUrlForLLM(dataUrl, opts = {}) {
+    const img = await scheduleLLMLoadImageFromDataUrl(dataUrl);
+    const maxSide = Number(opts.maxSide || 1600);
+    const mime = String(opts.mime || 'image/jpeg');
+    const quality = Math.max(0.5, Math.min(0.95, Number(opts.quality || 0.82)));
+
+    const w0 = img.naturalWidth || img.width || 1;
+    const h0 = img.naturalHeight || img.height || 1;
+    const scale = Math.min(1, maxSide / Math.max(w0, h0));
+    const w = Math.max(1, Math.round(w0 * scale));
+    const h = Math.max(1, Math.round(h0 * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const outUrl = canvas.toDataURL(mime, quality);
+    return { dataUrl: outUrl, width: w, height: h };
+}
+
 function scheduleLLMLoadScriptOnce(src, id, timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
         if (typeof document === 'undefined') return reject(new Error('no_dom'));
@@ -813,9 +844,56 @@ function scheduleLLMLoadScriptOnce(src, id, timeoutMs = 15000) {
     });
 }
 
+function scheduleLLMImportModuleWithTimeout(url, timeoutMs = 15000) {
+    const src = String(url || '').trim();
+    return new Promise((resolve, reject) => {
+        let done = false;
+        const timer = setTimeout(() => {
+            if (done) return;
+            done = true;
+            reject(new Error('module_load_timeout:' + src));
+        }, Math.max(1, parseInt(timeoutMs || 0, 10) || 15000));
+
+        Promise.resolve()
+            .then(() => import(src))
+            .then((mod) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                resolve(mod);
+            })
+            .catch((e) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                const msg = (e && e.message) ? e.message : String(e);
+                reject(new Error('module_load_failed:' + src + ':' + msg));
+            });
+    });
+}
+
+function scheduleLLMConfigurePdfJsWorker(workerUrl) {
+    if (typeof pdfjsLib === 'undefined' || !pdfjsLib || !pdfjsLib.GlobalWorkerOptions) return;
+
+    const wurl = String(workerUrl || '').trim();
+    if (!wurl) return;
+
+    const isMjs = /\.mjs(\?|#|$)/i.test(wurl);
+    if (isMjs && typeof Worker !== 'undefined') {
+        try {
+            const w = new Worker(wurl, { type: 'module' });
+            pdfjsLib.GlobalWorkerOptions.workerPort = w;
+        } catch (_) {
+        }
+    }
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc = wurl;
+}
+
 async function scheduleLLMEnsurePdfJsAsync() {
     if (typeof pdfjsLib !== 'undefined' && pdfjsLib) {
-        if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        const hasWorker = !!(pdfjsLib.GlobalWorkerOptions && (pdfjsLib.GlobalWorkerOptions.workerSrc || pdfjsLib.GlobalWorkerOptions.workerPort));
+        if (pdfjsLib.GlobalWorkerOptions && !hasWorker) {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
         }
         return true;
@@ -827,21 +905,31 @@ async function scheduleLLMEnsurePdfJsAsync() {
     }
 
     const urls = [
-        { lib: '/pdf.min.js', worker: '/pdf.worker.min.js' },
-        { lib: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js', worker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js' },
-        { lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.js', worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.js' }
+        { kind: 'module', lib: '/pdf.mjs', worker: '/pdf.worker.mjs' },
+        { kind: 'module', lib: '/pdf.min.mjs', worker: '/pdf.worker.min.mjs' },
+        { kind: 'script', lib: '/pdf.min.js', worker: '/pdf.worker.min.js' },
+        { kind: 'script', lib: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js', worker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js' },
+        { kind: 'module', lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.mjs', worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.mjs' },
+        { kind: 'module', lib: 'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.mjs', worker: 'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.worker.mjs' }
     ];
 
     const p = (async () => {
         let lastErr = '';
         for (const u of urls) {
             try {
-                await scheduleLLMLoadScriptOnce(u.lib, 'schedulellm-pdfjs');
+                if (u.kind === 'module') {
+                    const mod = await scheduleLLMImportModuleWithTimeout(u.lib, 20000);
+                    if (typeof window !== 'undefined') window.pdfjsLib = mod;
+                } else {
+                    await scheduleLLMLoadScriptOnce(u.lib, 'schedulellm-pdfjs');
+                }
+
                 if (typeof pdfjsLib !== 'undefined' && pdfjsLib) {
-                    if (pdfjsLib.GlobalWorkerOptions) pdfjsLib.GlobalWorkerOptions.workerSrc = u.worker;
+                    scheduleLLMConfigurePdfJsWorker(u.worker);
                     if (typeof window !== 'undefined') window.__scheduleLLMPdfJsLastError = '';
                     return true;
                 }
+
                 lastErr = 'pdfjsLib_missing_after_load:' + u.lib;
             } catch (e) {
                 lastErr = (e && e.message) ? e.message : String(e);
@@ -1023,6 +1111,74 @@ async function scheduleLLMParsePdfToGrid(file, opts) {
     const out = await scheduleLLMXhrFormDataJson('/api/parse-pdf', form, opts);
     const grid = out && Array.isArray(out.grid) ? out.grid : null;
     if (!Array.isArray(grid) || !grid.every(r => Array.isArray(r))) throw new Error('bad_pdf_grid');
+
+    const hasNonEmpty = grid.some(r => (r || []).some(c => String(c || '').trim()));
+    if (hasNonEmpty) return grid;
+
+    const service = window.llmService || (typeof llmService !== 'undefined' ? llmService : null);
+    if (!service) throw new Error('pdf_llm_component_missing');
+
+    const baseUrlEl = document.getElementById('llmBaseUrl');
+    const apiKeyEl = document.getElementById('llmApiKey');
+    const modelEl = document.getElementById('llmModel');
+
+    const config = {
+        baseUrl: baseUrlEl ? baseUrlEl.value : '',
+        apiKey: apiKeyEl ? apiKeyEl.value : '',
+        model: modelEl ? modelEl.value : ''
+    };
+
+    const isProxy = /\/api\/llm\/?$/.test((config.baseUrl || '').trim());
+    if (!config.baseUrl) throw new Error('pdf_llm_not_configured');
+    if (!isProxy && !config.apiKey) throw new Error('pdf_llm_missing_apikey');
+
+    service.updateConfig(config.baseUrl, config.apiKey, config.model);
+
+    const first = await scheduleLLMPdfFirstPageToPngDataUrl(f);
+    const packed = await scheduleLLMPackImageDataUrlForLLM(first.dataUrl, { maxSide: 1600, mime: 'image/jpeg', quality: 0.82 });
+
+    const out2 = await service.parseScheduleImageToGrid(packed.dataUrl, { timeoutMs: (opts && opts.timeoutMs) ? opts.timeoutMs : 120000 });
+    if (!out2 || out2.error) throw new Error('pdf_llm_failed:' + String(out2 && out2.error ? out2.error : 'unknown'));
+
+    const grid2 = out2 && Array.isArray(out2.grid) ? out2.grid : null;
+    if (!Array.isArray(grid2) || !grid2.every(r => Array.isArray(r))) throw new Error('bad_pdf_grid');
+
+    return grid2;
+}
+
+async function scheduleLLMParseImageToGrid(file, opts) {
+    const f = file;
+    const name = String(f && f.name ? f.name : '').toLowerCase();
+    const isImage = /\.(png|jpe?g|webp|bmp|tiff?)$/.test(name) || String(f && f.type ? f.type : '').toLowerCase().startsWith('image/');
+    if (!f || !isImage) throw new Error('not_image');
+
+    const service = window.llmService || (typeof llmService !== 'undefined' ? llmService : null);
+    if (!service) throw new Error('image_llm_component_missing');
+
+    const baseUrlEl = document.getElementById('llmBaseUrl');
+    const apiKeyEl = document.getElementById('llmApiKey');
+    const modelEl = document.getElementById('llmModel');
+
+    const config = {
+        baseUrl: baseUrlEl ? baseUrlEl.value : '',
+        apiKey: apiKeyEl ? apiKeyEl.value : '',
+        model: modelEl ? modelEl.value : ''
+    };
+
+    const isProxy = /\/api\/llm\/?$/.test((config.baseUrl || '').trim());
+    if (!config.baseUrl) throw new Error('image_llm_not_configured');
+    if (!isProxy && !config.apiKey) throw new Error('image_llm_missing_apikey');
+
+    service.updateConfig(config.baseUrl, config.apiKey, config.model);
+
+    const dataUrl = await scheduleLLMReadAsDataURL(f);
+    const packed = await scheduleLLMPackImageDataUrlForLLM(dataUrl, { maxSide: 1600, mime: 'image/jpeg', quality: 0.82 });
+
+    const out = await service.parseScheduleImageToGrid(packed.dataUrl, { timeoutMs: (opts && opts.timeoutMs) ? opts.timeoutMs : 120000 });
+    if (!out || out.error) throw new Error('image_llm_failed:' + String(out && out.error ? out.error : 'unknown'));
+
+    const grid = out && Array.isArray(out.grid) ? out.grid : null;
+    if (!Array.isArray(grid) || !grid.every(r => Array.isArray(r))) throw new Error('bad_image_grid');
     return grid;
 }
 
@@ -1074,6 +1230,7 @@ async function handleFileUpload(e) {
     const lowerName = String(file.name || '').toLowerCase();
     const isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
     const isPdf = lowerName.endsWith('.pdf') || String(file.type || '').toLowerCase() === 'application/pdf';
+    const isImage = /\.(png|jpe?g|webp|bmp|tiff?)$/.test(lowerName) || String(file.type || '').toLowerCase().startsWith('image/');
 
     try {
         scheduleLLMSetCalendarProgress('正在读取文件…', null, null, null, '');
@@ -1102,11 +1259,12 @@ async function handleFileUpload(e) {
             }
 
             console.log("File loaded. Rows:", rawScheduleData.length);
+            scheduleLLMSetCalendarProgress('解析完成', 100, null, null, '', 'ok');
             scheduleLLMOnScheduleFileLoaded(file.name);
             return;
         }
 
-        if (!isPdf) {
+        if (!isPdf && !isImage) {
             throw new Error('unsupported_file_type');
         }
 
@@ -1114,22 +1272,28 @@ async function handleFileUpload(e) {
         scheduleLLMSetUploadProgress('准备解析…', true);
 
         let pdfPages = 1;
-        scheduleLLMSetUploadProgress('正在加载 PDF 解析组件', true);
-        scheduleLLMSetCalendarProgress('正在加载 PDF 解析组件', null, null, null, '');
-        const ok = await scheduleLLMEnsurePdfJsAsync();
-        if (ok) {
-            scheduleLLMSetUploadProgress('正在渲染 PDF（第1页）…', true);
-            scheduleLLMSetCalendarProgress('正在处理文件…', null, null, null, '正在解析第1页/共?页');
-            const out = await scheduleLLMPdfFirstPageToPngDataUrl(file);
-            pdfPages = out && out.totalPages ? out.totalPages : 1;
-            scheduleLLMSetCalendarProgress('正在处理文件…', null, null, null, `正在解析第1页/共${pdfPages}页`);
-            if (out.canvas) scheduleLLMShowUploadPreviewCanvas(out.canvas);
+        if (isPdf) {
+            scheduleLLMSetUploadProgress('正在加载 PDF 解析组件', true);
+            scheduleLLMSetCalendarProgress('正在加载 PDF 解析组件', null, null, null, '');
+            const ok = await scheduleLLMEnsurePdfJsAsync();
+            if (ok) {
+                scheduleLLMSetUploadProgress('正在渲染 PDF（第1页）…', true);
+                scheduleLLMSetCalendarProgress('正在处理文件…', null, null, null, '正在解析第1页/共?页');
+                const out = await scheduleLLMPdfFirstPageToPngDataUrl(file);
+                pdfPages = out && out.totalPages ? out.totalPages : 1;
+                scheduleLLMSetCalendarProgress('正在处理文件…', null, null, null, `正在解析第1页/共${pdfPages}页`);
+                if (out.canvas) scheduleLLMShowUploadPreviewCanvas(out.canvas);
+            }
+        } else {
+            const dataUrl = await scheduleLLMReadAsDataURL(file);
+            if (dataUrl) scheduleLLMShowUploadPreviewImage(dataUrl);
         }
 
         const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         let lastAt = t0;
         let lastLoaded = 0;
         let speedAvg = 0;
+        const extraText = isPdf ? `正在解析第1页/共${pdfPages}页` : (isImage ? '正在解析图片…' : '');
 
         let parseWaitStarted = false;
         const onUploadProgress = ({ loaded, total, done }) => {
@@ -1144,8 +1308,6 @@ async function handleFileUpload(e) {
             const tt = Math.max(0, Number(total) || 0);
             const ll = Math.max(0, Number(loaded) || 0);
             const hasTotal = tt > 0 && ll <= tt;
-
-            const extraText = isPdf ? `正在解析第1页/共${pdfPages}页` : '';
 
             if ((done || (hasTotal && ll >= tt)) && !parseWaitStarted) {
                 parseWaitStarted = true;
@@ -1169,10 +1331,12 @@ async function handleFileUpload(e) {
             scheduleLLMSetUploadProgress(`正在上传文件… ${pct}%`, true);
         };
 
-        scheduleLLMSetCalendarProgress('正在上传文件…', null, null, null, isPdf ? `正在解析第1页/共${pdfPages}页` : '');
+        scheduleLLMSetCalendarProgress('正在上传文件…', null, null, null, extraText);
         scheduleLLMSetUploadProgress('正在上传文件…', true);
 
-        const grid = await scheduleLLMParsePdfToGrid(file, { onUploadProgress, timeoutMs: 120000 });
+        const grid = isPdf
+            ? await scheduleLLMParsePdfToGrid(file, { onUploadProgress, timeoutMs: 120000 })
+            : await scheduleLLMParseImageToGrid(file, { onUploadProgress, timeoutMs: 120000 });
         rawScheduleData = grid;
         workbook = null;
 
@@ -1186,11 +1350,23 @@ async function handleFileUpload(e) {
         const msg = (err && err.message) ? err.message : String(err);
         let friendly = msg;
         if (msg === 'unsupported_file_type') {
-            friendly = '当前仅支持上传 Excel（.xlsx/.xls）或 PDF（.pdf）';
+            friendly = '当前仅支持上传 Excel（.xlsx/.xls）、PDF（.pdf）或图片（.png/.jpg/.jpeg/.webp/.bmp/.tif/.tiff）';
         } else if (msg === 'not_pdf') {
             friendly = '当前仅支持上传 PDF（.pdf）';
+        } else if (msg === 'not_image') {
+            friendly = '当前仅支持上传图片（.png/.jpg/.jpeg/.webp/.bmp/.tif/.tiff）';
         } else if (msg === 'bad_pdf_grid') {
-            friendly = 'PDF 解析未提取到可用表格（建议使用可复制文字的课表 PDF，或先导出为 Excel）';
+            friendly = 'PDF 解析未提取到可用表格（建议使用可复制文字的课表 PDF，或提高 PDF 清晰度后重试）';
+        } else if (msg === 'pdf_llm_component_missing') {
+            friendly = 'LLM 组件未加载（请确认 llm_parser.js 已在页面引入）';
+        } else if (msg === 'pdf_llm_not_configured') {
+            friendly = '未配置 LLM 接口地址（建议使用后端 /api/llm）';
+        } else if (msg === 'pdf_llm_missing_apikey') {
+            friendly = '直连模式缺少 API Key（生产环境建议使用后端 /api/llm 代理）';
+        } else if (msg.startsWith('pdf_llm_failed:')) {
+            friendly = 'LLM PDF(第1页)识别失败：' + msg.slice('pdf_llm_failed:'.length);
+        } else if (msg === 'bad_image_grid') {
+            friendly = '图片解析未提取到可用表格（建议提高图片清晰度或使用 PDF/Excel）';
         } else if (msg === 'pdfjs_not_loaded') {
             friendly = 'PDF 预览组件加载失败（不影响解析）。可尝试：1) 刷新重试；2) 换网络/关闭拦截插件；3) 部署同源 /pdf.min.js 与 /pdf.worker.min.js（离线/内网推荐）。';
         } else if (msg === 'pdf_render_timeout') {
@@ -1209,6 +1385,47 @@ async function handleFileUpload(e) {
 }
 
 // Core Parsing Logic
+function scheduleLLMSanitizePeriodRange(periodRange) {
+    if (!periodRange) return "";
+
+    const raw = String(periodRange).trim();
+    if (!raw) return "";
+
+    // 修正 OCR/LLM 可能输出的“第0节/0-2节”等无效节次：节次编号强制从 1 开始
+    let s = raw
+        .replace(/[（(]/g, '')
+        .replace(/[）)]/g, '')
+        .replace(/[节课]/g, '')
+        .replace(/第/g, '')
+        .replace(/[~～—–−]/g, '-')
+        .replace(/至/g, '-')
+        .replace(/[，、;；]/g, ',');
+
+    const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+    if (!parts.length) parts.push(s);
+
+    const normParts = parts.map(part => {
+        const nums = String(part).match(/-?\d+/g);
+        if (!nums || nums.length === 0) return part;
+
+        const toP = (n) => {
+            const v = parseInt(n, 10);
+            if (!Number.isFinite(v)) return 1;
+            return v >= 1 ? v : 1;
+        };
+
+        const a = toP(nums[0]);
+        if (nums.length >= 2) {
+            let b = toP(nums[1]);
+            if (b < a) b = a;
+            return a === b ? String(a) : `${a}-${b}`;
+        }
+        return String(a);
+    });
+
+    return normParts.join(',');
+}
+
 function parseCourseString(cellContent) {
     if (!cellContent || typeof cellContent !== 'string') return [];
 
@@ -1404,6 +1621,8 @@ function parseCourseString(cellContent) {
                 const pMatch2 = weekStrRaw.match(/\(([^)]*?)节\)/);
                 if (pMatch2) periodRange = pMatch2[1];
             }
+
+            periodRange = scheduleLLMSanitizePeriodRange(periodRange);
         } else {
             // FALLBACK: If no "X周" found
             console.warn("No weeks found for course:", courseStr);
@@ -1485,6 +1704,16 @@ function standardizeLocation(loc) {
     // 1. Basic Cleaning
     s = s.replace(/实验实训中心/g, "实训楼");
     s = s.replace(/(校区|场地|地点|场所)[：:]\s*/g, "");
+
+    s = s.replace(/北苑电影大楼/g, "电影楼");
+    s = s.replace(/学术中心/g, "学术楼");
+    s = s.replace(/南苑综合楼/g, "南综楼");
+    s = s.replace(/第二教学楼/g, "二教");
+    s = s.replace(/艺术大楼/g, "艺术楼");
+    s = s.replace(/传媒大楼/g, "传媒楼");
+    s = s.replace(/体育训练馆/g, "体育馆");
+    s = s.replace(/创新创业大厦/g, "创新楼");
+    s = s.replace(/电子信息大楼/g, "电子楼");
 
     // 2. Remove Campus Noise
     const campusNoise = ["桂林洋", "府城", "龙昆南", "校区"];
@@ -1934,14 +2163,18 @@ function scheduleLLMProgressAddCourses(courses, source) {
     arr.forEach(c => {
         const name = c && (c.name || c.displayName || c.rawName) ? String(c.name || c.displayName || c.rawName) : '未命名课程';
         const time = scheduleLLMFormatCourseTime(c);
+
+        const locSeed = (c && c.building && c.room) ? mergeBuildingRoom(c.building, c.room) : (c && c.location ? String(c.location) : '');
+        const locInfo = standardizeLocation(locSeed);
+
         const item = {
             name,
             time,
             teacher: c && c.teacher ? String(c.teacher) : '',
             className: c && c.className ? String(c.className) : '',
-            location: c && c.location ? String(c.location) : '',
-            building: c && c.building ? String(c.building) : '',
-            room: c && c.room ? String(c.room) : '',
+            location: locInfo.location || (c && c.location ? String(c.location) : ''),
+            building: locInfo.building || (c && c.building ? String(c.building) : ''),
+            room: locInfo.room || (c && c.room ? String(c.room) : ''),
             raw_weeks: c && c.raw_weeks ? String(c.raw_weeks) : (c && c.weeksRaw ? String(c.weeksRaw) : ''),
             periodRange: c && c.periodRange ? String(c.periodRange) : '',
             source: source ? String(source) : ''
@@ -2386,9 +2619,21 @@ async function generateSchedule() {
                 if (!cell) return -1;
                 const s = String(cell).trim();
 
-                // 1. Check for standard digits
+                // 1. Check for explicit “第X节” / “X节”
+                const explicitMatch = s.match(/第?\s*(\d+)\s*节/);
+                if (explicitMatch) {
+                    const v = parseInt(explicitMatch[1], 10);
+                    if (!Number.isFinite(v)) return -1;
+                    return v >= 1 ? v : 1;
+                }
+
+                // 2. Check for standard digits at beginning
                 const digitMatch = s.match(/^(\d+)/);
-                if (digitMatch) return parseInt(digitMatch[1]);
+                if (digitMatch) {
+                    const v = parseInt(digitMatch[1], 10);
+                    if (!Number.isFinite(v)) return -1;
+                    return v >= 1 ? v : 1;
+                }
 
                 // 2. Check for Chinese numerals
                 const cnNums = {
@@ -2459,7 +2704,7 @@ async function generateSchedule() {
                             weeks: Array.isArray(c.weeks) ? c.weeks : parseWeekString(c.raw_weeks || c.weeks),
                             location: locInfo.location || "待通知",
                             className: c.className ? c.className.replace(/^[\(（]/, '').replace(/[\)）]$/, '') : "",
-                            periodRange: c.periodRange || "",
+                            periodRange: scheduleLLMSanitizePeriodRange(c.periodRange || ""),
                             rawStr: cellContent,
                             building: locInfo.building,
                             room: locInfo.room

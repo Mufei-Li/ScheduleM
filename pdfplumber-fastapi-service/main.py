@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from statistics import median
 from typing import List, Optional, Any
 
 import pdfplumber
@@ -95,6 +96,7 @@ def parse_pdf_content(content: bytes, file_name: str) -> ParseResult:
     best_score = (0, 0, 0)
 
     with pdfplumber.open(bio) as pdf:
+        page_count = len(pdf.pages)
         for idx, page in enumerate(pdf.pages, start=1):
             page_tables: List[ParsedTable] = []
 
@@ -122,7 +124,10 @@ def parse_pdf_content(content: bytes, file_name: str) -> ParseResult:
 
             pages_out.append(ParsedPage(page_number=idx, tables=page_tables))
 
-    return ParseResult(file_name=file_name, grid=rows_to_grid(best_rows), pages=pages_out)
+    if best_rows:
+        return ParseResult(file_name=file_name, grid=rows_to_grid(best_rows), pages=pages_out)
+
+    return ParseResult(file_name=file_name, grid=[], pages=pages_out)
 
 
 @app.post("/api/parse-pdf", response_model=ParseResult)
@@ -142,17 +147,28 @@ def cli_main(argv: List[str]) -> int:
     if len(argv) < 3 or argv[1] != "--cli":
         return 2
     file_path = argv[2]
+    ext = os.path.splitext(file_path)[1].lower()
     try:
+        import contextlib
+
         with open(file_path, "rb") as f:
             content = f.read()
-        out = parse_pdf_content(content, os.path.basename(file_path))
+
+        with contextlib.redirect_stdout(sys.stderr):
+            if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"]:
+                raise ValueError("image_not_supported")
+            out = parse_pdf_content(content, os.path.basename(file_path))
+
         payload = out.model_dump() if hasattr(out, "model_dump") else out.dict()
         raw = json.dumps(payload, ensure_ascii=False)
         sys.stdout.buffer.write(raw.encode("utf-8"))
         sys.stdout.flush()
         return 0
-    except Exception as e:
-        sys.stderr.write(str(e))
+    except Exception:
+        import traceback
+
+        sys.stderr.write(traceback.format_exc())
+        sys.stderr.flush()
         return 1
 
 
