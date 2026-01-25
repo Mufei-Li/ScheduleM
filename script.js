@@ -2487,7 +2487,7 @@ async function generateSchedule() {
         // Defined here to be used both for LLM filtering and main loop skipping
         const ignorePatterns = [
             /(星期|周)[\s\n]*[一二三四五六日天]/,
-            /第\s*[-]*\s*[一二三四五六七八九十\d]+\s*[-~+～至,\s]*\s*[一二三四五六七八九十\d]*\s*节/,
+            /^\s*第?\s*[-]*\s*[一二三四五六七八九十\d]+\s*[-~+～至,\s]*\s*[一二三四五六七八九十\d]*\s*节\s*$/,
             /^第\s*[一二三四五六七八九十\d]+$/,
             /^第$/,
             /^节$/,
@@ -2736,7 +2736,7 @@ async function generateSchedule() {
             if (rest) headerEmbeddedCourses[idx] = rest;
         });
 
-        const colToDayIdx = {}; // col -> 1(Mon)..7(Sun)
+        let colToDayIdx = {}; // col -> 1(Mon)..7(Sun)
         headerRow.forEach((cell, idx) => {
             if (!cell || typeof cell !== 'string') return;
             if (/(星期|周)一/.test(cell)) colToDayIdx[idx] = 1;
@@ -2780,6 +2780,72 @@ async function generateSchedule() {
             const row = rawScheduleData[r];
             if (!row || row.length === 0) continue;
             rowsToIterate.push(row);
+        }
+
+        const dayCols = Object.keys(colToDayIdx).map(n => parseInt(n, 10)).filter(Number.isFinite).sort((a, b) => a - b);
+        if (dayCols.length > 0) {
+            const sampleRows = [];
+            for (let r = headerRowIdx + 1; r < rawScheduleData.length && sampleRows.length < 6; r++) {
+                const row = rawScheduleData[r];
+                if (!row || row.length === 0) continue;
+                sampleRows.push(row);
+            }
+
+            const stripPeriodPrefixLine = (s0) => {
+                const s = String(s0 || '');
+                return s.replace(/^\s*第?\s*(?:[一二三四五六七八九十\d]{1,3})\s*(?:-\s*(?:[一二三四五六七八九十\d]{1,3}))?\s*节\s*(?:[\r\n]+|$)/, '');
+            };
+
+            const periodOnlyCountAt = (col) => {
+                let n = 0;
+                for (const row of sampleRows) {
+                    const s = String((row && row[col] != null) ? row[col] : '').trim();
+                    if (!s) continue;
+                    const stripped = stripPeriodPrefixLine(s).trim();
+                    if (stripped === '' && /^\s*第?\s*[一二三四五六七八九十\d]/.test(s) && /节\s*$/.test(s)) n++;
+                }
+                return n;
+            };
+
+            const courseLikeCountAt = (col) => {
+                let n = 0;
+                for (const row of sampleRows) {
+                    const s0 = String((row && row[col] != null) ? row[col] : '').trim();
+                    if (!s0) continue;
+                    const s = stripPeriodPrefixLine(s0).trim();
+                    if (!s) continue;
+                    const hasLines = /\n/.test(s0) && s0.split(/\n+/).filter(Boolean).length >= 2;
+                    const hasCourseTokens = /(\d+\s*周|周\(|\/[\s\S]*?\d+\s*周)/.test(s0) || /(教|楼|室|馆|中心)/.test(s0) || /\/[A-Za-z]?\d+/.test(s0);
+                    if (hasLines || hasCourseTokens) n++;
+                }
+                return n;
+            };
+
+            const minCol = dayCols[0];
+            const threshold = Math.max(2, Math.ceil(sampleRows.length * 0.6));
+            const p0 = periodOnlyCountAt(minCol);
+            const c0 = courseLikeCountAt(minCol);
+            const c1 = courseLikeCountAt(minCol + 1);
+            const pPrev = (minCol > 0) ? periodOnlyCountAt(minCol - 1) : 0;
+            const cPrev = (minCol > 0) ? courseLikeCountAt(minCol - 1) : 0;
+
+            let shift = 0;
+            if (p0 >= threshold && c1 > c0) {
+                shift = 1;
+            } else if (minCol > 0 && pPrev >= threshold && c0 > cPrev) {
+                shift = -1;
+            }
+
+            if (shift !== 0) {
+                const adjusted = {};
+                Object.entries(colToDayIdx).forEach(([k, v]) => {
+                    const nk = parseInt(k, 10);
+                    if (!Number.isFinite(nk)) return;
+                    adjusted[nk + shift] = v;
+                });
+                colToDayIdx = adjusted;
+                console.warn('[Day Map Shift]', { shift, before: dayCols, after: Object.keys(colToDayIdx).map(n => parseInt(n, 10)).filter(Number.isFinite).sort((a, b) => a - b) });
+            }
         }
 
         const parsePeriodCellInfo = (cell) => {
@@ -2856,9 +2922,21 @@ async function generateSchedule() {
             if (!timeSlotStart || !timeSlotEnd) continue;
 
             // Iterate Columns
-            for (const [colIdx, dayIdx] of Object.entries(colToDayIdx)) {
-                const cellContent = row[colIdx];
-                if (!cellContent || typeof cellContent !== 'string' || !cellContent.trim()) continue;
+            for (const [colIdx0, dayIdx0] of Object.entries(colToDayIdx)) {
+                const colIdx = parseInt(colIdx0, 10);
+                const dayIdx = parseInt(dayIdx0, 10);
+                if (!Number.isFinite(colIdx) || !Number.isFinite(dayIdx)) continue;
+
+                const rawCell = (row && row[colIdx] != null) ? row[colIdx] : '';
+                if (rawCell == null) continue;
+
+                let cellContent = (typeof rawCell === 'string') ? rawCell : String(rawCell);
+                if (!cellContent || !cellContent.trim()) continue;
+
+                const stripped = cellContent.replace(/^\s*第?\s*(?:[一二三四五六七八九十\d]{1,3})\s*(?:-\s*(?:[一二三四五六七八九十\d]{1,3}))?\s*节\s*(?:[\r\n]+|$)/, '');
+                if (stripped && stripped.trim() && stripped.trim() !== cellContent.trim()) {
+                    cellContent = stripped;
+                }
 
                 // Skip if matches any ignore pattern (Headers, Time slots, etc.)
                 if (ignorePatterns.some(p => p.test(cellContent.trim()))) {
