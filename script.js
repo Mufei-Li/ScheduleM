@@ -2711,8 +2711,11 @@ async function generateSchedule() {
         let headerRowIdx = -1;
         for (let r = 0; r < rawScheduleData.length; r++) {
             const row = rawScheduleData[r];
-            // Support "星期一" or "周一"
-            if (row.some(c => c && typeof c === 'string' && /(星期|周)一/.test(c))) {
+            const dayCount = (row || []).reduce((n, c) => {
+                if (!c || typeof c !== 'string') return n;
+                return /(星期|周)\s*[一二三四五六日天]/.test(c) ? (n + 1) : n;
+            }, 0);
+            if (dayCount >= 3) {
                 headerRowIdx = r;
                 break;
             }
@@ -2748,7 +2751,6 @@ async function generateSchedule() {
             if (/(星期|周)(日|天)/.test(cell)) colToDayIdx[idx] = 7;
         });
 
-        console.log("Day Map:", colToDayIdx);
         // Iterate rows below header
         const events = [];
         const weeklessBuffer = []; // Buffer for courses without specific weeks
@@ -2785,7 +2787,7 @@ async function generateSchedule() {
         const dayCols = Object.keys(colToDayIdx).map(n => parseInt(n, 10)).filter(Number.isFinite).sort((a, b) => a - b);
         if (dayCols.length > 0) {
             const sampleRows = [];
-            for (let r = headerRowIdx + 1; r < rawScheduleData.length && sampleRows.length < 6; r++) {
+            for (let r = headerRowIdx + 1; r < rawScheduleData.length && sampleRows.length < 8; r++) {
                 const row = rawScheduleData[r];
                 if (!row || row.length === 0) continue;
                 sampleRows.push(row);
@@ -2796,13 +2798,22 @@ async function generateSchedule() {
                 return s.replace(/^\s*第?\s*(?:[一二三四五六七八九十\d]{1,3})\s*(?:-\s*(?:[一二三四五六七八九十\d]{1,3}))?\s*节\s*(?:[\r\n]+|$)/, '');
             };
 
-            const periodOnlyCountAt = (col) => {
+            const isPeriodish = (s0) => {
+                const s = String(s0 || '').trim().replace(/[~～—–−]/g, '-');
+                if (!s) return false;
+                if (/^(?:节次|节)$/.test(s)) return true;
+                if (/^(?:上|下|晚|早|午)\s*(?:午|晚|晨|间|上)?$/.test(s)) return true;
+                if (/^第?\s*[一二三四五六七八九十\d]{1,3}\s*(?:-\s*[一二三四五六七八九十\d]{1,3})?\s*节?$/.test(s)) return true;
+                if (/^\d+\s*(?:-\s*\d+)?\s*节?$/.test(s)) return true;
+                return false;
+            };
+
+            const periodLikeCountAt = (col) => {
                 let n = 0;
                 for (const row of sampleRows) {
-                    const s = String((row && row[col] != null) ? row[col] : '').trim();
-                    if (!s) continue;
-                    const stripped = stripPeriodPrefixLine(s).trim();
-                    if (stripped === '' && /^\s*第?\s*[一二三四五六七八九十\d]/.test(s) && /节\s*$/.test(s)) n++;
+                    const s0 = String((row && row[col] != null) ? row[col] : '').trim();
+                    if (!s0) continue;
+                    if (isPeriodish(s0) && !/\n/.test(s0)) n++;
                 }
                 return n;
             };
@@ -2812,41 +2823,58 @@ async function generateSchedule() {
                 for (const row of sampleRows) {
                     const s0 = String((row && row[col] != null) ? row[col] : '').trim();
                     if (!s0) continue;
+                    if (isPeriodish(s0)) continue;
                     const s = stripPeriodPrefixLine(s0).trim();
                     if (!s) continue;
                     const hasLines = /\n/.test(s0) && s0.split(/\n+/).filter(Boolean).length >= 2;
-                    const hasCourseTokens = /(\d+\s*周|周\(|\/[\s\S]*?\d+\s*周)/.test(s0) || /(教|楼|室|馆|中心)/.test(s0) || /\/[A-Za-z]?\d+/.test(s0);
-                    if (hasLines || hasCourseTokens) n++;
+                    const hasWeeks = /(\d+\s*[-~～—–−]\s*\d+|\d+)\s*周/.test(s0) || /周\s*\(/.test(s0);
+                    const hasPlace = /(教|楼|室|馆|中心)/.test(s0) || /[A-Za-z]\s*\d{2,}/.test(s0) || /\d{3,}/.test(s0);
+                    if (hasLines || hasWeeks || hasPlace) n++;
                 }
                 return n;
             };
 
-            const minCol = dayCols[0];
-            const threshold = Math.max(2, Math.ceil(sampleRows.length * 0.6));
-            const p0 = periodOnlyCountAt(minCol);
-            const c0 = courseLikeCountAt(minCol);
-            const c1 = courseLikeCountAt(minCol + 1);
-            const pPrev = (minCol > 0) ? periodOnlyCountAt(minCol - 1) : 0;
-            const cPrev = (minCol > 0) ? courseLikeCountAt(minCol - 1) : 0;
+            const candidateShifts = [-2, -1, 0, 1, 2];
+            const baseCols = dayCols.slice();
+            let bestShift = 0;
+            let bestScore = -Infinity;
+            let baseScore = -Infinity;
 
-            let shift = 0;
-            if (p0 >= threshold && c1 > c0) {
-                shift = 1;
-            } else if (minCol > 0 && pPrev >= threshold && c0 > cPrev) {
-                shift = -1;
+            for (const sh of candidateShifts) {
+                let good = 0;
+                let bad = 0;
+                let oob = 0;
+                for (const col of baseCols) {
+                    const cc = col + sh;
+                    if (cc < 0) {
+                        oob++;
+                        continue;
+                    }
+                    good += courseLikeCountAt(cc);
+                    bad += periodLikeCountAt(cc);
+                }
+                const score = good * 2 - bad * 3 - oob * 8 - Math.abs(sh) * 0.2;
+                if (sh === 0) baseScore = score;
+                if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && Math.abs(sh) < Math.abs(bestShift))) {
+                    bestScore = score;
+                    bestShift = sh;
+                }
             }
 
-            if (shift !== 0) {
+            const improve = bestScore - baseScore;
+            if (bestShift !== 0 && improve >= 4) {
                 const adjusted = {};
                 Object.entries(colToDayIdx).forEach(([k, v]) => {
                     const nk = parseInt(k, 10);
                     if (!Number.isFinite(nk)) return;
-                    adjusted[nk + shift] = v;
+                    adjusted[nk + bestShift] = v;
                 });
                 colToDayIdx = adjusted;
-                console.warn('[Day Map Shift]', { shift, before: dayCols, after: Object.keys(colToDayIdx).map(n => parseInt(n, 10)).filter(Number.isFinite).sort((a, b) => a - b) });
+                console.warn('[Day Map Shift]', { shift: bestShift, improve, before: baseCols, after: Object.keys(colToDayIdx).map(n => parseInt(n, 10)).filter(Number.isFinite).sort((a, b) => a - b) });
             }
         }
+
+        console.log("Day Map:", colToDayIdx);
 
         const parsePeriodCellInfo = (cell) => {
             if (!cell) return null;
