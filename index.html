@@ -97,6 +97,20 @@
                         <option value="windows">Windows (Outlook)</option>
                         <option value="vcard">通讯录 (vCard/VCF)</option>
                     </select>
+
+                    <label class="llm-toggle" style="font-size:0.8rem; color:#666; margin: 0 0 0.3rem 0;">
+                        <input type="checkbox" id="exportAlarmEnabled" checked> 添加提醒（仅 iOS/Android ICS）
+                    </label>
+                    <label for="exportAlarmMinutes" style="display:block; font-size:0.8rem; color:#666; margin-bottom:0.3rem;">日历提前提醒时间设定：</label>
+                    <select id="exportAlarmMinutes" class="btn-secondary" style="margin-bottom: 0.5rem; width: 100%;">
+                        <option value="0">不提醒</option>
+                        <option value="5">5 分钟</option>
+                        <option value="10">10 分钟</option>
+                        <option value="15" selected>15 分钟</option>
+                        <option value="30">30 分钟</option>
+                        <option value="60">60 分钟</option>
+                    </select>
+
                     <button id="btnExport" class="btn-secondary">导出 ICS/VCF</button>
                     <button id="btnSaveHtml" class="btn-secondary">保存为网页 (HTML)</button>
                 </div>

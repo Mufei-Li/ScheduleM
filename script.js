@@ -3646,6 +3646,13 @@ document.getElementById('btnExport').addEventListener('click', () => {
     if (device === 'windows') prodId = "-//Microsoft Corporation//Outlook 16.0 MIMEDIR//EN";
     if (device === 'ios') prodId = "-//Apple Inc.//iOS 15.0//EN";
 
+    const alarmEnabledEl = document.getElementById('exportAlarmEnabled');
+    const alarmMinutesEl = document.getElementById('exportAlarmMinutes');
+
+    let alarmEnabled = alarmEnabledEl ? !!alarmEnabledEl.checked : true;
+    let alarmMinutes = alarmMinutesEl ? parseInt(alarmMinutesEl.value, 10) : 15;
+    if (!Number.isFinite(alarmMinutes) || alarmMinutes < 0) alarmMinutes = 15;
+
     let icsContent = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:${prodId}\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n`;
 
     // Windows Outlook: Add TimeZone Definition? 
@@ -3702,9 +3709,8 @@ document.getElementById('btnExport').addEventListener('click', () => {
         icsContent += `DESCRIPTION:${description}\r\n`;
 
         // Alarms
-        if (device === 'ios' || device === 'android') {
-            // 15 min reminder
-            icsContent += "BEGIN:VALARM\r\nTRIGGER:-PT15M\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\n";
+        if ((device === 'ios' || device === 'android') && alarmEnabled && alarmMinutes > 0) {
+            icsContent += `BEGIN:VALARM\r\nTRIGGER:-PT${alarmMinutes}M\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\n`;
         }
 
         // Windows Outlook specific categories?
