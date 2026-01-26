@@ -2799,12 +2799,29 @@ async function generateSchedule() {
             };
 
             const isPeriodish = (s0) => {
-                const s = String(s0 || '').trim().replace(/[~～—–−]/g, '-');
-                if (!s) return false;
-                if (/^(?:节次|节)$/.test(s)) return true;
-                if (/^(?:上|下|晚|早|午)\s*(?:午|晚|晨|间|上)?$/.test(s)) return true;
-                if (/^第?\s*[一二三四五六七八九十\d]{1,3}\s*(?:-\s*[一二三四五六七八九十\d]{1,3})?\s*节?$/.test(s)) return true;
-                if (/^\d+\s*(?:-\s*\d+)?\s*节?$/.test(s)) return true;
+                const raw = String(s0 || '');
+                const trimmed = raw.trim();
+                if (!trimmed) return false;
+
+                const s = trimmed.replace(/[~～—–−]/g, '-');
+                const flat = s.replace(/\s+/g, ' ');
+
+                const lines = s.split(/\n+/).map(x => x.trim()).filter(Boolean);
+                const first = lines[0] || flat;
+
+                const timeRangeRe = /(?:^|\s)\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}(?:\s|$)/;
+                if (timeRangeRe.test(flat)) {
+                    if (/^(?:节次|节)$/.test(first)) return true;
+                    if (/^(?:上|下|晚|早|午)\s*(?:午|晚|晨|间|上)?$/.test(first)) return true;
+                    if (/^第?\s*[一二三四五六七八九十\d]{1,3}\s*(?:-\s*[一二三四五六七八九十\d]{1,3})?\s*节?$/.test(first)) return true;
+                    if (/^\d{1,2}\s*(?:-\s*\d{1,2})?\s*节?$/.test(first)) return true;
+                    if (/^\d{1,2}$/.test(first)) return true;
+                }
+
+                if (/^(?:节次|节)$/.test(flat)) return true;
+                if (/^(?:上|下|晚|早|午)\s*(?:午|晚|晨|间|上)?$/.test(flat)) return true;
+                if (/^第?\s*[一二三四五六七八九十\d]{1,3}\s*(?:-\s*[一二三四五六七八九十\d]{1,3})?\s*节?$/.test(first)) return true;
+                if (/^\d+\s*(?:-\s*\d+)?\s*节?$/.test(first)) return true;
                 return false;
             };
 
@@ -2813,7 +2830,7 @@ async function generateSchedule() {
                 for (const row of sampleRows) {
                     const s0 = String((row && row[col] != null) ? row[col] : '').trim();
                     if (!s0) continue;
-                    if (isPeriodish(s0) && !/\n/.test(s0)) n++;
+                    if (isPeriodish(s0)) n++;
                 }
                 return n;
             };

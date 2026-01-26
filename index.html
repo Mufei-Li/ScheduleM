@@ -9,6 +9,17 @@
     <!-- SheetJS for Excel processing -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <!--baidu tongji-->
+    <script>
+        var _hmt = _hmt || [];
+        (function() {
+        var hm = document.createElement("script");
+        hm.src = "https://hm.baidu.com/hm.js?fac775161e4d94dff642c2e42523c568";
+        var s = document.getElementsByTagName("script")[0]; 
+        s.parentNode.insertBefore(hm, s);
+        })();
+    </script>
+
 </head>
 
 <body>
@@ -163,7 +174,7 @@
             </div>
 
             <div id="calendarArea" class="calendar-container">
-                <div class="placeholder-text">请上传课表成功后点击左侧栏按钮生成月历</div>
+                <div class="placeholder-text">上传课表成功后请点击生成月历按钮</div>
                 <div class="placeholder-hint">建议上传Excel或可编辑版PDF文件，扫描版PDF及图片识别效果可能受限。</div>
             </div>
 
@@ -188,11 +199,9 @@
         </main>
     </div>
     <!-- Runtime Configuration (Optional) -->
-    <script src="config.js" onerror="console.log('No external config found, using manual input.')"></script>
     <script src="llm_parser.js"></script>
     <script src="time_utils.js"></script>
     <script src="script.js"></script>
-    <script data-goatcounter="https://nene310.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 </body>
 
 </html>
