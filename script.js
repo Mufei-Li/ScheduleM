@@ -2465,6 +2465,7 @@ let generatedEvents = [];
 let currentCalendarDate = new Date();
 let scheduleLLMMinMonth = null;
 let scheduleLLMMaxMonth = null;
+let scheduleLLMSemesterStartDate = null;
 
 async function generateSchedule() {
     try {
@@ -2706,6 +2707,7 @@ async function generateSchedule() {
         const startDateInput = document.getElementById('semesterStart').value;
         if (!startDateInput) return;
         const semesterStart = new Date(startDateInput);
+        scheduleLLMSemesterStartDate = new Date(semesterStart.getTime());
 
         // Find Header Row
         let headerRowIdx = -1;
@@ -3148,6 +3150,19 @@ function scheduleLLMCompareMonth(a, b) {
     return (a.getFullYear() - b.getFullYear()) || (a.getMonth() - b.getMonth());
 }
 
+function scheduleLLMWeekNumberForDate(d) {
+    if (!scheduleLLMSemesterStartDate || !(scheduleLLMSemesterStartDate instanceof Date) || !Number.isFinite(scheduleLLMSemesterStartDate.getTime())) return null;
+    if (!d || !(d instanceof Date) || !Number.isFinite(d.getTime())) return null;
+
+    const startUtc = Date.UTC(scheduleLLMSemesterStartDate.getFullYear(), scheduleLLMSemesterStartDate.getMonth(), scheduleLLMSemesterStartDate.getDate());
+    const dayUtc = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const diffDays = Math.floor((dayUtc - startUtc) / 86400000);
+    const weekNum = Math.floor(diffDays / 7) + 1;
+
+    if (!Number.isFinite(weekNum) || weekNum <= 0) return null;
+    return weekNum;
+}
+
 function scheduleLLMSetMonthRangeFromEvents(events) {
     if (!Array.isArray(events) || events.length === 0) {
         scheduleLLMMinMonth = null;
@@ -3463,16 +3478,17 @@ function createMonthCalendarElement(date, options) {
         if (dayOfWeek === 0) dayOfWeek = 7;
 
         if (dayOfWeek === 1 || d === 1) {
-            // Find week number from the first event of this day?
-            // Or calculate from semester start? 
-            // Since events have 'week' property, we can pick one.
-            // If no events, we can't easily know week unless we pass semesterStart globally.
-            // But we can peek at any event in this week?
-            // Simplest: If dayEvents has items, take first one's week.
-            if (dayEvents.length > 0) {
+            let weekNum = null;
+            if (dayEvents.length > 0 && Number.isFinite(dayEvents[0].week)) {
+                weekNum = dayEvents[0].week;
+            } else {
+                weekNum = scheduleLLMWeekNumberForDate(currentDayDate);
+            }
+
+            if (Number.isFinite(weekNum) && weekNum > 0) {
                 const badge = document.createElement('span');
                 badge.className = 'week-badge';
-                badge.textContent = `第${dayEvents[0].week}周`;
+                badge.textContent = `第${weekNum}周`;
                 dayNumRow.appendChild(badge);
             }
         }
@@ -4094,7 +4110,7 @@ document.getElementById('btnSaveHtml').addEventListener('click', () => {
 <body>
     <header class="export-header">
         <h1>我的课程表</h1>
-        <p>由 ScheduleLLM 自动生成</p>
+        <p>由析课识别生成</p>
     </header>
     <div class="content-wrapper">
         ${container.innerHTML}
