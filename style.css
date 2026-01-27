@@ -51,19 +51,29 @@ body {
 }
 
 @media (max-width: 720px) {
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
     .app-container {
         flex-direction: column;
         height: auto;
         min-height: 100%;
     }
+
     .config-panel {
         width: 100%;
         border-right: none;
         border-bottom: 1px solid var(--border-color);
         box-shadow: none;
     }
+
     .main-content {
         padding: 1rem;
+        overflow: visible;
     }
 }
 
