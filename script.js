@@ -3379,13 +3379,17 @@ function renderCalendar(events) {
 }
 
 function formatWeekRanges(weeks) {
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    if (utils && typeof utils.formatWeekRanges === 'function') {
+        return utils.formatWeekRanges(weeks);
+    }
+
     if (!weeks || weeks.length === 0) return "";
-    // Ensure sorted and unique
     const uniqueWeeks = Array.from(new Set(weeks)).sort((a, b) => a - b);
     const ranges = [];
     let start = uniqueWeeks[0];
     let end = uniqueWeeks[0];
-    
+
     for (let i = 1; i < uniqueWeeks.length; i++) {
         if (uniqueWeeks[i] === end + 1) {
             end = uniqueWeeks[i];
@@ -3555,16 +3559,23 @@ function createMonthCalendarElement(date, options) {
                     <div class="ev-print-line2">${title}</div>
                 `;
             } else {
-                // Tooltip Content
-                const weeksText = formatWeekRanges(ev.weeks);
+                const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+                const tooltipInfo = (utils && typeof utils.formatClassAndWeeksLines === 'function')
+                    ? utils.formatClassAndWeeksLines(ev.classNames, ev.weeks)
+                    : (() => {
+                        const weeksText = formatWeekRanges(ev.weeks);
+                        const cleanNames = (Array.isArray(ev.classNames) ? ev.classNames : [])
+                            .filter(n => n)
+                            .map(n => String(n).replace(/^[\(（]/, '').replace(/[\)）]$/, ''));
+                        const tooltipClassText = cleanNames.length > 0 ? cleanNames.join('/') : "";
+                        const lines = [];
+                        if (tooltipClassText) lines.push(tooltipClassText);
+                        if (weeksText) lines.push(weeksText);
+                        return { classText: tooltipClassText, weeksText, lines };
+                    })();
 
-                // Combine Class Names: "Class1/Class2"
-                // Filter empty names and clean them
-                const cleanNames = ev.classNames
-                    .filter(n => n)
-                    .map(n => n.replace(/^[\(（]/, '').replace(/[\)）]$/, ''));
-
-                const tooltipClassText = cleanNames.length > 0 ? cleanNames.join('/') : "";
+                const tooltipClassText = tooltipInfo.classText;
+                const weeksText = tooltipInfo.weeksText;
 
                 evEl.innerHTML = `
                     <div class="ev-header">
@@ -3714,6 +3725,88 @@ document.getElementById('btnExport').addEventListener('click', () => {
     let alarmMinutes = alarmMinutesEl ? parseInt(alarmMinutesEl.value, 10) : 15;
     if (!Number.isFinite(alarmMinutes) || alarmMinutes < 0) alarmMinutes = 15;
 
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+
+    const icsEscapeText = (utils && typeof utils.icsEscapeText === 'function')
+        ? utils.icsEscapeText
+        : (val) => String(val == null ? '' : val)
+            .replace(/\\/g, '\\\\')
+            .replace(/\r\n|\r|\n/g, '\\n')
+            .replace(/;/g, '\\;')
+            .replace(/,/g, '\\,');
+
+    const icsFoldLine = (utils && typeof utils.icsFoldLine === 'function')
+        ? utils.icsFoldLine
+        : (line) => String(line == null ? '' : line);
+
+    const scheduleLLMDayStrForExport = (d) => String(d.toISOString().split('T')[0]).replace(/-/g, '');
+
+    const scheduleLLMInstanceClassNames = new Map();
+    generatedEvents.forEach(ev => {
+        const dayStr = scheduleLLMDayStrForExport(ev.date);
+        const key = `${dayStr}-${ev.period}-${ev.location}-${ev.title}`;
+        if (!scheduleLLMInstanceClassNames.has(key)) scheduleLLMInstanceClassNames.set(key, []);
+        const arr = scheduleLLMInstanceClassNames.get(key);
+        if (ev.className && !arr.includes(ev.className)) arr.push(ev.className);
+    });
+
+    const scheduleLLMBuildExportDescription = (ev) => {
+        const dayStr = scheduleLLMDayStrForExport(ev.date);
+        const key = `${dayStr}-${ev.period}-${ev.location}-${ev.title}`;
+        const classNames = scheduleLLMInstanceClassNames.get(key) || (ev.className ? [ev.className] : []);
+
+        const info = (utils && typeof utils.formatClassAndWeeksLines === 'function')
+            ? utils.formatClassAndWeeksLines(classNames, ev.weeks)
+            : (() => {
+                const weeksText = formatWeekRanges(ev.weeks);
+                const cleanNames = (Array.isArray(classNames) ? classNames : [])
+                    .filter(n => n)
+                    .map(n => String(n).replace(/^[\(（]/, '').replace(/[\)）]$/, ''))
+                    .filter(Boolean);
+                const classText = cleanNames.length > 0 ? cleanNames.join('/') : '';
+                const lines = [];
+                if (classText) lines.push(classText);
+                if (weeksText) lines.push(weeksText);
+                return { lines };
+            })();
+
+        return (info && Array.isArray(info.lines)) ? info.lines.join('\n') : '';
+    };
+
+    const scheduleLLMExportSlots = (typeof scheduleLLMGetTimeSlotsFromInputs === 'function')
+        ? scheduleLLMGetTimeSlotsFromInputs()
+        : (Array.isArray(defaultTimeSlots) ? defaultTimeSlots : []);
+
+    const scheduleLLMGetExportTimeRangeForEvent = (ev) => {
+        const periodRange = ev && ev.periodRange ? ev.periodRange : '';
+        const fallbackPeriod = ev && Number.isFinite(ev.period) ? ev.period : null;
+
+        const tr = (utils && typeof utils.getTimeRangeForPeriod === 'function')
+            ? utils.getTimeRangeForPeriod(scheduleLLMExportSlots, periodRange, fallbackPeriod)
+            : null;
+
+        if (!tr) {
+            const startTime = ev && ev.startTime ? ev.startTime : '';
+            const endTime = ev && ev.endTime ? ev.endTime : '';
+            if (!startTime || !endTime) {
+                console.warn('[ExportTimeInvalid]', { title: ev && ev.title, periodRange, fallbackPeriod, startTime, endTime });
+            }
+            return { startTime, endTime, source: 'event' };
+        }
+
+        if (ev && ev.startTime && ev.endTime && (ev.startTime !== tr.startTime || ev.endTime !== tr.endTime)) {
+            console.warn('[ExportTimeMismatch]', {
+                title: ev.title,
+                periodRange,
+                period: fallbackPeriod,
+                eventTime: `${ev.startTime}-${ev.endTime}`,
+                exportTime: `${tr.startTime}-${tr.endTime}`
+            });
+        }
+
+        return { startTime: tr.startTime, endTime: tr.endTime, source: 'settings' };
+    };
+
     let icsContent = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:${prodId}\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n`;
 
     // Windows Outlook: Add TimeZone Definition? 
@@ -3724,16 +3817,23 @@ document.getElementById('btnExport').addEventListener('click', () => {
         let vcsContent = `BEGIN:VCALENDAR\r\nVERSION:1.0\r\nPRODID:-//ScheduleLLM//CN\r\nTZ:-08\r\n`;
 
         generatedEvents.forEach(ev => {
-            const dayStr = ev.date.toISOString().split('T')[0].replace(/-/g, '');
-            const startStr = `${dayStr}T${ev.startTime.replace(/:/g, '')}00`;
-            const endStr = `${dayStr}T${ev.endTime.replace(/:/g, '')}00`;
+            const dayStr = scheduleLLMDayStrForExport(ev.date);
+            const tr = scheduleLLMGetExportTimeRangeForEvent(ev);
+            const startStr = `${dayStr}T${String(tr.startTime || '').replace(/:/g, '')}00`;
+            const endStr = `${dayStr}T${String(tr.endTime || '').replace(/:/g, '')}00`;
+
+            if (!tr.startTime || !tr.endTime) {
+                console.warn('[VCSExportMissingTime]', { title: ev && ev.title, dayStr, periodRange: ev && ev.periodRange, period: ev && ev.period, source: tr.source });
+            }
+
+            const description = scheduleLLMBuildExportDescription(ev);
 
             vcsContent += "BEGIN:VEVENT\r\n";
-            vcsContent += `SUMMARY:${ev.title}\r\n`;
+            vcsContent += icsFoldLine(`SUMMARY:${icsEscapeText(ev.title)}`) + "\r\n";
             vcsContent += `DTSTART:${startStr}\r\n`;
             vcsContent += `DTEND:${endStr}\r\n`;
-            vcsContent += `LOCATION:${ev.location}\r\n`;
-            vcsContent += `DESCRIPTION:${ev.description}\r\n`;
+            vcsContent += icsFoldLine(`LOCATION:${icsEscapeText(ev.location)}`) + "\r\n";
+            vcsContent += icsFoldLine(`DESCRIPTION:${icsEscapeText(description)}`) + "\r\n";
             vcsContent += "END:VEVENT\r\n";
         });
 
@@ -3751,9 +3851,14 @@ document.getElementById('btnExport').addEventListener('click', () => {
 
     generatedEvents.forEach(ev => {
         // Format Date: YYYYMMDDTHHMMSS
-        const dayStr = ev.date.toISOString().split('T')[0].replace(/-/g, '');
-        const startStr = `${dayStr}T${ev.startTime.replace(/:/g, '')}00`;
-        const endStr = `${dayStr}T${ev.endTime.replace(/:/g, '')}00`;
+        const dayStr = scheduleLLMDayStrForExport(ev.date);
+        const tr = scheduleLLMGetExportTimeRangeForEvent(ev);
+        const startStr = `${dayStr}T${String(tr.startTime || '').replace(/:/g, '')}00`;
+        const endStr = `${dayStr}T${String(tr.endTime || '').replace(/:/g, '')}00`;
+
+        if (!tr.startTime || !tr.endTime) {
+            console.warn('[ICSExportMissingTime]', { title: ev && ev.title, dayStr, periodRange: ev && ev.periodRange, period: ev && ev.period, source: tr.source });
+        }
 
         let description = ev.description;
         if (device === 'ios') {
@@ -3765,9 +3870,11 @@ document.getElementById('btnExport').addEventListener('click', () => {
         icsContent += `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z\r\n`;
         icsContent += `DTSTART;TZID=Asia/Shanghai:${startStr}\r\n`;
         icsContent += `DTEND;TZID=Asia/Shanghai:${endStr}\r\n`;
-        icsContent += `SUMMARY:${ev.title}\r\n`;
-        icsContent += `LOCATION:${ev.location}\r\n`;
-        icsContent += `DESCRIPTION:${description}\r\n`;
+        description = scheduleLLMBuildExportDescription(ev);
+
+        icsContent += icsFoldLine(`SUMMARY:${icsEscapeText(ev.title)}`) + "\r\n";
+        icsContent += icsFoldLine(`LOCATION:${icsEscapeText(ev.location)}`) + "\r\n";
+        icsContent += icsFoldLine(`DESCRIPTION:${icsEscapeText(description)}`) + "\r\n";
 
         // Alarms
         if ((device === 'ios' || device === 'android') && alarmEnabled && alarmMinutes > 0) {

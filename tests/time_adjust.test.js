@@ -59,4 +59,36 @@ assert.deepStrictEqual(utils.parseWeekString('8-12周(XX)'), [8, 10, 12]);
 assert.deepStrictEqual(utils.parseWeekString('1-16周(旦)'), [1, 3, 5, 7, 9, 11, 13, 15]);
 assert.deepStrictEqual(utils.parseWeekString('2-16周(对)'), [2, 4, 6, 8, 10, 12, 14, 16]);
 
+assert.strictEqual(utils.formatWeekRanges([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), '第1-16周');
+assert.strictEqual(utils.formatWeekRanges([1, 3, 4, 5, 7]), '第1,3-5,7周');
+
+const tip = utils.formatClassAndWeeksLines(['(计科1班)', '计科2班', '', null], [1, 2, 3]);
+assert.deepStrictEqual(tip.lines, ['计科1班/计科2班', '第1-3周']);
+
+assert.strictEqual(utils.icsEscapeText('a,b;c\\d\ne'), 'a\\,b\\;c\\\\d\\ne');
+
+assert.deepStrictEqual(utils.getPeriodBounds('1-2节'), { start: 1, end: 2 });
+assert.deepStrictEqual(utils.getPeriodBounds('第3节'), { start: 3, end: 3 });
+assert.deepStrictEqual(utils.getPeriodBounds('', 2), { start: 2, end: 2 });
+
+const tr12 = utils.getTimeRangeForPeriod(baseSlots, '1-2', 1);
+assert.deepStrictEqual(tr12, { startPeriod: 1, endPeriod: 2, startTime: '08:20', endTime: '10:00' });
+
+const tr1 = utils.getTimeRangeForPeriod(baseSlots, '1', 1);
+assert.deepStrictEqual(tr1, { startPeriod: 1, endPeriod: 1, startTime: '08:20', endTime: '09:05' });
+
+const trFallback = utils.getTimeRangeForPeriod(baseSlots, '', 2);
+assert.deepStrictEqual(trFallback, { startPeriod: 2, endPeriod: 2, startTime: '09:15', endTime: '10:00' });
+
+const trInvalid = utils.getTimeRangeForPeriod(baseSlots, 'abc', null);
+assert.strictEqual(trInvalid, null);
+
+const long = 'DESCRIPTION:' + 'A'.repeat(80);
+const folded = utils.icsFoldLine(long, 75);
+assert.ok(folded.includes('\r\n '));
+assert.strictEqual(folded.replace(/\r\n /g, ''), long);
+folded.split(/\r\n /).forEach(part => {
+  assert.ok(Buffer.byteLength(part, 'utf8') <= 75);
+});
+
 console.log('time_adjust tests passed');

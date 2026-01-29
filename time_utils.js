@@ -323,6 +323,169 @@
         return Array.from(weekSet).sort((a, b) => a - b);
     };
 
+    const formatWeekRanges = (weeks) => {
+        if (!Array.isArray(weeks) || weeks.length === 0) return '';
+        const uniqueWeeks = Array.from(new Set(weeks)).filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+        if (uniqueWeeks.length === 0) return '';
+
+        const ranges = [];
+        let start = uniqueWeeks[0];
+        let end = uniqueWeeks[0];
+
+        for (let i = 1; i < uniqueWeeks.length; i++) {
+            if (uniqueWeeks[i] === end + 1) {
+                end = uniqueWeeks[i];
+            } else {
+                ranges.push(start === end ? `${start}` : `${start}-${end}`);
+                start = uniqueWeeks[i];
+                end = uniqueWeeks[i];
+            }
+        }
+        ranges.push(start === end ? `${start}` : `${start}-${end}`);
+        return `第${ranges.join(',')}周`;
+    };
+
+    const formatClassAndWeeksLines = (classNames, weeks) => {
+        const names = Array.isArray(classNames) ? classNames : (classNames ? [classNames] : []);
+        const cleanNames = names
+            .filter(n => n)
+            .map(n => String(n).replace(/^[\(（]/, '').replace(/[\)）]$/, ''))
+            .filter(Boolean);
+
+        const dedup = [];
+        for (const n of cleanNames) {
+            if (!dedup.includes(n)) dedup.push(n);
+        }
+
+        const classText = dedup.length > 0 ? dedup.join('/') : '';
+        const weeksText = formatWeekRanges(weeks);
+
+        const lines = [];
+        if (classText) lines.push(classText);
+        if (weeksText) lines.push(weeksText);
+
+        return { classText, weeksText, lines };
+    };
+
+    const icsEscapeText = (val) => {
+        if (val == null) return '';
+        return String(val)
+            .replace(/\\/g, '\\\\')
+            .replace(/\r\n|\r|\n/g, '\\n')
+            .replace(/;/g, '\\;')
+            .replace(/,/g, '\\,');
+    };
+
+    const icsFoldLine = (line, limitBytes) => {
+        const limit = Number.isFinite(limitBytes) ? Number(limitBytes) : 75;
+        const s = String(line == null ? '' : line);
+        if (!s) return '';
+
+        const enc = (typeof TextEncoder !== 'undefined') ? new TextEncoder() : null;
+        const byteLen = (str) => {
+            if (enc) return enc.encode(str).length;
+            if (typeof Buffer !== 'undefined') return Buffer.byteLength(str, 'utf8');
+            return unescape(encodeURIComponent(str)).length;
+        };
+
+        if (byteLen(s) <= limit) return s;
+
+        let out = '';
+        let cur = '';
+
+        for (const ch of s) {
+            const next = cur + ch;
+            if (byteLen(next) > limit) {
+                if (out) out += '\r\n ';
+                out += cur;
+                cur = ch;
+            } else {
+                cur = next;
+            }
+        }
+
+        if (cur) {
+            if (out) out += '\r\n ';
+            out += cur;
+        }
+
+        return out;
+    };
+
+    const getPeriodBounds = (periodRange, fallbackPeriod, opts) => {
+        const maxPeriod = (opts && Number.isFinite(opts.maxPeriod)) ? Number(opts.maxPeriod) : 20;
+
+        const toP = (n) => {
+            const v = parseInt(n, 10);
+            if (!Number.isFinite(v)) return null;
+            if (v <= 0) return null;
+            if (v > maxPeriod) return null;
+            return v;
+        };
+
+        const raw = periodRange == null ? '' : String(periodRange);
+        const norm = sanitizePeriodRange(raw);
+        const s = norm ? String(norm) : '';
+
+        const nums = [];
+        if (s) {
+            const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+            for (const part of parts) {
+                const mRange = part.match(/^(\d+)\s*-\s*(\d+)$/);
+                if (mRange) {
+                    const a = toP(mRange[1]);
+                    const b = toP(mRange[2]);
+                    if (a != null) nums.push(a);
+                    if (b != null) nums.push(b);
+                    continue;
+                }
+                const mSingle = part.match(/^(\d+)$/);
+                if (mSingle) {
+                    const a = toP(mSingle[1]);
+                    if (a != null) nums.push(a);
+                }
+            }
+        }
+
+        if (nums.length === 0) {
+            const fb = toP(fallbackPeriod);
+            if (fb == null) return null;
+            return { start: fb, end: fb };
+        }
+
+        let start = nums[0];
+        let end = nums[0];
+        for (const n of nums) {
+            if (n < start) start = n;
+            if (n > end) end = n;
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        if (end < start) end = start;
+        return { start, end };
+    };
+
+    const getTimeRangeForPeriod = (slots, periodRange, fallbackPeriod) => {
+        if (!Array.isArray(slots) || slots.length === 0) return null;
+
+        const bounds = getPeriodBounds(periodRange, fallbackPeriod, { maxPeriod: slots.length });
+        if (!bounds) return null;
+
+        const startSlot = slots[bounds.start - 1];
+        const endSlot = slots[bounds.end - 1];
+        if (!startSlot || !endSlot) return null;
+
+        const startTime = startSlot.start;
+        const endTime = endSlot.end;
+        if (!isValidTime(startTime) || !isValidTime(endTime)) return null;
+
+        return {
+            startPeriod: bounds.start,
+            endPeriod: bounds.end,
+            startTime,
+            endTime
+        };
+    };
+
     const api = {
         isValidTime,
         parseTimeToMinutes,
@@ -334,7 +497,13 @@
         computeShiftedSlots,
         sanitizePeriodRange,
         normalizeWeekParityToken,
-        parseWeekString
+        parseWeekString,
+        formatWeekRanges,
+        formatClassAndWeeksLines,
+        icsEscapeText,
+        icsFoldLine,
+        getPeriodBounds,
+        getTimeRangeForPeriod
     };
 
     if (typeof window !== 'undefined') {
