@@ -110,17 +110,16 @@ h1 {
 
 .brand-footer {
     margin-top: auto;
-    padding: 1.5rem 0 0;
+    padding: 1.25rem 0 0;
     width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
     gap: 0.35rem;
+    text-align: center;
     background: transparent;
     border: 0;
-    box-shadow: none;
-    text-align: center;
 }
 
 .brand-logo {
@@ -153,6 +152,285 @@ h1 {
     margin: 0 auto;
     display: block;
     line-height: 1.5;
+}
+
+.compliance-area {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    padding-top: 0.25rem;
+}
+
+.icp-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    text-decoration: none;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.icp-link:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+}
+
+.icp-link:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+    border-radius: 8px;
+}
+
+.icp-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+}
+
+.compliance-buttons {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+}
+
+.compliance-btn {
+    width: auto;
+    padding: 6px 8px;
+    border-radius: 10px;
+    font-weight: 800;
+    font-size: 0.85rem;
+    min-height: 32px;
+    line-height: 1.1;
+    white-space: nowrap;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.05s ease;
+}
+
+.compliance-btn:hover {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+}
+
+.compliance-btn:active {
+    transform: translateY(1px);
+}
+
+.compliance-btn:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+}
+
+.modal-backdrop[hidden] {
+    display: none;
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.modal-dialog {
+    width: min(720px, 100%);
+    max-height: min(80vh, 720px);
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    transform: translateY(10px) scale(0.99);
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.modal-backdrop.is-open .modal-dialog {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.modal-backdrop.is-compact .modal-dialog {
+    width: min(420px, 100%);
+    max-height: min(70vh, 520px);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+    background: #ffffff;
+}
+
+.modal-title {
+    font-size: 1rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.modal-close {
+    border: 1px solid var(--border-color);
+    background: #ffffff;
+    color: var(--text-primary);
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-close:hover {
+    background: #f8fafc;
+}
+
+.modal-close:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+}
+
+.modal-body {
+    padding: 12px 14px;
+    overflow: auto;
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    line-height: 1.7;
+}
+
+.modal-actions {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    background: #ffffff;
+}
+
+.modal-actions:empty {
+    display: none;
+}
+
+.modal-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.modal-richtext {
+    font-family: "Inter", system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+}
+
+.modal-section-title {
+    margin-top: 12px;
+    margin-bottom: 6px;
+    font-weight: 900;
+    color: #0f172a;
+    font-size: 0.92rem;
+}
+
+.modal-list {
+    padding-left: 1.1rem;
+    margin: 0;
+}
+
+.modal-list li {
+    margin: 6px 0;
+}
+
+.modal-note {
+    margin-top: 12px;
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+}
+
+.contact-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.contact-email {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-weight: 800;
+    color: #0f172a;
+    word-break: break-all;
+}
+
+.copy-icon-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: #ffffff;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.05s ease;
+}
+
+.copy-icon-btn:hover {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+}
+
+.copy-icon-btn:active {
+    transform: translateY(1px);
+}
+
+.copy-icon-btn:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+}
+
+.copy-icon-btn.is-copied {
+    background: #ecfdf5;
+    border-color: #86efac;
+    color: #065f46;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .modal-dialog {
+        transition: none;
+    }
+    .compliance-btn {
+        transition: none;
+    }
 }
 
 h3 {
@@ -1663,6 +1941,26 @@ input[type="time"] {
     background: #f5f3ff;
 }
 
+.print-page-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.print-page-footer img {
+    height: 16px;
+    max-height: 16px;
+    width: auto;
+    max-width: 120px;
+    object-fit: contain;
+    display: block;
+}
+
 /* Print Styles */
 @media print {
     @page {
@@ -1711,6 +2009,10 @@ input[type="time"] {
         width: 100%;
     }
 
+    .brand-footer {
+        display: none !important;
+    }
+
     /* Print All Container */
     .print-all-container {
         display: block;
@@ -1719,14 +2021,31 @@ input[type="time"] {
 
     .month-container {
         page-break-inside: avoid;
-        /* Try to keep month on one page */
         page-break-after: always;
-        /* Force new page for next month */
         margin-bottom: 2rem;
         height: 95vh;
-        /* Try to fill the page */
         display: flex;
         flex-direction: column;
+    }
+
+    .print-page-footer {
+        flex: 0 0 auto;
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: #334155;
+        font-size: 9pt;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+    }
+
+    .print-page-footer img {
+        height: 16px;
+        width: auto;
+        object-fit: contain;
+        display: block;
     }
 
     .month-container:last-child {

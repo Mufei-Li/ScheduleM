@@ -1707,9 +1707,9 @@ function standardizeLocation(loc) {
     s = s.replace(/实验实训中心/g, "实训楼");
     s = s.replace(/(校区|场地|地点|场所)[：:]\s*/g, "");
 
-    s = s.replace(/北苑电影大楼/g, "电影楼");
+    s = s.replace(/北苑电影大楼/g, "北苑电影");
     s = s.replace(/学术中心/g, "学术楼");
-    s = s.replace(/南苑综合楼/g, "南综楼");
+    s = s.replace(/南苑综合大楼/g, "南苑综合");
     s = s.replace(/第二教学楼/g, "二教");
     s = s.replace(/艺术大楼/g, "艺术楼");
     s = s.replace(/传媒大楼/g, "传媒楼");
@@ -3605,6 +3605,28 @@ function createMonthCalendarElement(date, options) {
     }
 
     monthContainer.appendChild(grid);
+
+    if (printMode) {
+        const footer = document.createElement('div');
+        footer.className = 'print-page-footer';
+
+        const logo = document.createElement('img');
+        logo.src = 'Logo_yedaoai_Green_Web600.png';
+        logo.alt = 'YedaoAI';
+        logo.loading = 'lazy';
+        logo.decoding = 'async';
+        logo.style.height = '16px';
+        logo.style.maxHeight = '16px';
+        logo.style.width = 'auto';
+
+        const text = document.createElement('span');
+        text.textContent = 'yedaoai.com';
+
+        footer.appendChild(logo);
+        footer.appendChild(text);
+        monthContainer.appendChild(footer);
+    }
+
     return monthContainer;
 }
 
@@ -4235,3 +4257,152 @@ document.getElementById('btnSaveHtml').addEventListener('click', () => {
     link.click();
     document.body.removeChild(link);
 });
+
+function scheduleLLMCloneTemplate(templateId) {
+    const tmpl = document.getElementById(templateId);
+    if (!tmpl || !(tmpl instanceof HTMLTemplateElement)) return null;
+    return tmpl.content.cloneNode(true);
+}
+
+function scheduleLLMInitSiteModal() {
+    const btnAbout = document.getElementById('btnAboutXike');
+    const btnContact = document.getElementById('btnContact');
+
+    const backdrop = document.getElementById('siteModalBackdrop');
+    const dialog = backdrop ? backdrop.querySelector('.modal-dialog') : null;
+    const titleEl = document.getElementById('siteModalTitle');
+    const bodyEl = document.getElementById('siteModalBody');
+    const actionsEl = document.getElementById('siteModalActions');
+    const closeBtn = document.getElementById('siteModalClose');
+
+    if (!btnAbout || !btnContact || !backdrop || !dialog || !titleEl || !bodyEl || !actionsEl || !closeBtn) return;
+
+    let lastActiveEl = null;
+    let closeTimer = null;
+    const lockState = {
+        bodyOverflow: document.body.style.overflow,
+        htmlOverflow: document.documentElement.style.overflow
+    };
+
+    const clearCloseTimer = () => {
+        if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+        }
+    };
+
+    const setBodyScrollLocked = (locked) => {
+        if (locked) {
+            lockState.bodyOverflow = document.body.style.overflow;
+            lockState.htmlOverflow = document.documentElement.style.overflow;
+            document.body.style.overflow = 'hidden';
+            document.documentElement.style.overflow = 'hidden';
+            return;
+        }
+        document.body.style.overflow = lockState.bodyOverflow;
+        document.documentElement.style.overflow = lockState.htmlOverflow;
+    };
+
+    const renderModal = (type) => {
+        bodyEl.textContent = '';
+        actionsEl.textContent = '';
+
+        if (type === 'about') {
+            titleEl.textContent = '关于析课';
+            const content = scheduleLLMCloneTemplate('tmplAboutXike');
+            if (content) bodyEl.appendChild(content);
+            return;
+        }
+
+        if (type === 'contact') {
+            titleEl.textContent = '联系我们';
+            const content = scheduleLLMCloneTemplate('tmplContact');
+            if (content) bodyEl.appendChild(content);
+
+            const email = 'yedaoai@126.com';
+            const copyBtn = bodyEl.querySelector('#contactCopyBtn');
+
+            if (copyBtn) {
+                copyBtn.addEventListener('click', async () => {
+                    const done = () => {
+                        copyBtn.classList.add('is-copied');
+                        const originalTitle = copyBtn.getAttribute('title');
+                        copyBtn.setAttribute('title', '已复制');
+                        setTimeout(() => {
+                            copyBtn.classList.remove('is-copied');
+                            if (originalTitle) copyBtn.setAttribute('title', originalTitle);
+                        }, 1200);
+                    };
+
+                    try {
+                        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                            await navigator.clipboard.writeText(email);
+                            done();
+                            return;
+                        }
+
+                        const ta = document.createElement('textarea');
+                        ta.value = email;
+                        ta.setAttribute('readonly', '');
+                        ta.style.position = 'fixed';
+                        ta.style.left = '-9999px';
+                        ta.style.top = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        const ok = document.execCommand('copy');
+                        ta.remove();
+                        if (ok) done();
+                    } catch (e) {
+                        void e;
+                    }
+                }, { once: true });
+            }
+        }
+    };
+
+    const isOpen = () => !backdrop.hidden;
+
+    const openModal = (type) => {
+        clearCloseTimer();
+        lastActiveEl = document.activeElement;
+        renderModal(type);
+        backdrop.classList.toggle('is-compact', type === 'contact');
+        backdrop.hidden = false;
+        setBodyScrollLocked(true);
+        requestAnimationFrame(() => {
+            backdrop.classList.add('is-open');
+            closeBtn.focus();
+        });
+    };
+
+    const closeModal = () => {
+        if (!isOpen()) return;
+        clearCloseTimer();
+        backdrop.classList.remove('is-open');
+        backdrop.classList.remove('is-compact');
+        setBodyScrollLocked(false);
+        closeTimer = setTimeout(() => {
+            backdrop.hidden = true;
+            if (lastActiveEl && typeof lastActiveEl.focus === 'function') lastActiveEl.focus();
+        }, 180);
+    };
+
+    btnAbout.addEventListener('click', () => openModal('about'));
+    btnContact.addEventListener('click', () => openModal('contact'));
+
+    closeBtn.addEventListener('click', closeModal);
+
+    backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!isOpen()) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeModal();
+        }
+    });
+}
+
+scheduleLLMInitSiteModal();
