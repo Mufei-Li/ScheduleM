@@ -2177,12 +2177,33 @@ function scheduleLLMFormatCourseTime(c) {
 function scheduleLLMProgressAddCourses(courses, source) {
     const els = scheduleLLMProgressEls();
     if (!els || !els.list) return;
+
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    const slots = (typeof scheduleLLMGetTimeSlotsFromInputs === 'function')
+        ? scheduleLLMGetTimeSlotsFromInputs()
+        : (Array.isArray(defaultTimeSlots) ? defaultTimeSlots : []);
+
     const arr = Array.isArray(courses) ? courses : [];
     arr.forEach(c => {
-        const name = c && (c.name || c.displayName || c.rawName) ? String(c.name || c.displayName || c.rawName) : '未命名课程';
-        const time = scheduleLLMFormatCourseTime(c);
+        const name = c && (c.name || c.displayName || c.rawName) ? String(c.name || c.displayName || c.rawName) : '';
+        const rawWeeks = c && (c.raw_weeks || c.weeksRaw || c.weeks) ? String(c.raw_weeks || c.weeksRaw || c.weeks) : '';
+        const weeks = rawWeeks ? parseWeekString(rawWeeks) : [];
+        const prRaw = c && (c.periodRange || c.period) ? String(c.periodRange || c.period) : '';
+        const periodRange = prRaw ? scheduleLLMSanitizePeriodRange(prRaw) : '';
 
-        const locSeed = (c && c.building && c.room) ? mergeBuildingRoom(c.building, c.room) : (c && c.location ? String(c.location) : '');
+        const timeRange = (utils && typeof utils.getTimeRangeForPeriod === 'function')
+            ? utils.getTimeRangeForPeriod(slots, periodRange, null)
+            : null;
+
+        if (!name || !periodRange || !weeks || weeks.length === 0 || !timeRange) {
+            return;
+        }
+
+        const time = scheduleLLMFormatCourseTime({ periodRange, raw_weeks: rawWeeks });
+
+        const locSeed = (c && c.building && c.room)
+            ? mergeBuildingRoom(c.building, c.room)
+            : (c && c.location ? String(c.location) : '');
         const locInfo = standardizeLocation(locSeed);
 
         const item = {
@@ -2193,10 +2214,11 @@ function scheduleLLMProgressAddCourses(courses, source) {
             location: locInfo.location || (c && c.location ? String(c.location) : ''),
             building: locInfo.building || (c && c.building ? String(c.building) : ''),
             room: locInfo.room || (c && c.room ? String(c.room) : ''),
-            raw_weeks: c && c.raw_weeks ? String(c.raw_weeks) : (c && c.weeksRaw ? String(c.weeksRaw) : ''),
-            periodRange: c && c.periodRange ? String(c.periodRange) : '',
+            raw_weeks: rawWeeks,
+            periodRange: periodRange,
             source: source ? String(source) : ''
         };
+
         const idx = scheduleLLMRecognizedItems.push(item) - 1;
         const li = document.createElement('li');
         li.innerHTML = `<button type="button" class="llm-course-item" data-idx="${idx}"><span class="llm-course-item-name"></span><span class="llm-course-item-time"></span></button>`;
@@ -2205,6 +2227,7 @@ function scheduleLLMProgressAddCourses(courses, source) {
         btn.querySelector('.llm-course-item-time').textContent = time;
         els.list.appendChild(li);
     });
+
     if (els.summary) els.summary.textContent = String(scheduleLLMRecognizedItems.length);
 }
 
@@ -2297,12 +2320,8 @@ function scheduleLLMOnCalendarRendered(useLLM) {
     }
     scheduleLLMResetLayoutMode();
 
-    // Move Panel below calendar
-    const calendarArea = document.getElementById('calendarArea');
-    if (els.panel && calendarArea) {
-        calendarArea.insertAdjacentElement('afterend', els.panel);
-        els.panel.classList.add('moved-below-calendar');
-        els.panel.open = true;
+    if (els.panel) {
+        els.panel.open = false;
     }
 
     const shown = scheduleLLMShowAiWarningInRecognizedTitle();
@@ -2466,6 +2485,8 @@ let currentCalendarDate = new Date();
 let scheduleLLMMinMonth = null;
 let scheduleLLMMaxMonth = null;
 let scheduleLLMSemesterStartDate = null;
+let scheduleLLMCourseRules = [];
+let scheduleLLMEditHistory = [];
 
 async function generateSchedule() {
     try {
@@ -3089,6 +3110,10 @@ async function generateSchedule() {
         }
 
         generatedEvents = events;
+        scheduleLLMCourseRules = (typeof scheduleLLMBuildCourseRulesFromEvents === 'function')
+            ? scheduleLLMBuildCourseRulesFromEvents(events)
+            : [];
+        scheduleLLMEditHistory = [];
         console.log("Events generated:", events.length);
 
         if (events.length === 0) {
@@ -3139,6 +3164,772 @@ async function generateSchedule() {
              document.getElementById('btnGenerate').disabled = false;
         }
     }
+}
+
+function scheduleLLMNewId() {
+    if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function scheduleLLMDeepCloneRules(rules) {
+    try {
+        return JSON.parse(JSON.stringify(Array.isArray(rules) ? rules : []));
+    } catch (_) {
+        const arr = Array.isArray(rules) ? rules : [];
+        return arr.map(r => ({ ...r, weeks: Array.isArray(r.weeks) ? r.weeks.slice() : [] }));
+    }
+}
+
+function scheduleLLMGetSemesterStartDate() {
+    if (scheduleLLMSemesterStartDate instanceof Date && Number.isFinite(scheduleLLMSemesterStartDate.getTime())) {
+        return new Date(scheduleLLMSemesterStartDate.getTime());
+    }
+
+    const input = document.getElementById('semesterStart');
+    const v = input && input.value ? String(input.value) : '';
+    if (!v) return null;
+
+    const d = new Date(v);
+    if (!Number.isFinite(d.getTime())) return null;
+
+    scheduleLLMSemesterStartDate = new Date(d.getTime());
+    return new Date(d.getTime());
+}
+
+function scheduleLLMBuildCourseRulesFromEvents(events) {
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    const map = new Map();
+    const arr = Array.isArray(events) ? events : [];
+
+    arr.forEach(ev => {
+        if (!ev) return;
+
+        const title = ev.title ? String(ev.title) : '';
+        if (!title) return;
+
+        const rawTitle = ev.rawTitle ? String(ev.rawTitle) : '';
+        const location = ev.location ? String(ev.location) : '';
+        const className = ev.className ? String(ev.className) : '';
+        const dayOfWeek = Number.isFinite(ev.dayOfWeek)
+            ? ev.dayOfWeek
+            : (ev.date ? ((ev.date.getDay() === 0) ? 7 : ev.date.getDay()) : null);
+        if (!Number.isFinite(dayOfWeek) || dayOfWeek < 1 || dayOfWeek > 7) return;
+
+        const pr = scheduleLLMSanitizePeriodRange(ev.periodRange ? String(ev.periodRange) : (ev.period != null ? String(ev.period) : ''));
+        if (!pr) return;
+
+        const weekNum = Number.isFinite(ev.week) ? ev.week : null;
+        if (!Number.isFinite(weekNum) || weekNum <= 0) return;
+
+        const key = [title, rawTitle, location, className, String(dayOfWeek), pr].join('||');
+        if (!map.has(key)) {
+            map.set(key, {
+                id: scheduleLLMNewId(),
+                name: title,
+                rawName: rawTitle,
+                location,
+                className,
+                dayOfWeek,
+                periodRange: pr,
+                weeks: new Set()
+            });
+        }
+        map.get(key).weeks.add(weekNum);
+    });
+
+    const rules = Array.from(map.values()).map(r => {
+        const weeks = Array.from(r.weeks).filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+        const weeksRaw = (utils && typeof utils.formatWeekRanges === 'function')
+            ? utils.formatWeekRanges(weeks)
+            : (weeks.length ? `第${weeks[0]}-${weeks[weeks.length - 1]}周` : '');
+        return {
+            id: r.id,
+            name: r.name,
+            rawName: r.rawName,
+            location: r.location,
+            className: r.className,
+            dayOfWeek: r.dayOfWeek,
+            periodRange: r.periodRange,
+            weeksRaw,
+            weeks,
+            source: 'auto',
+            createdAt: 0
+        };
+    });
+
+    rules.sort((a, b) => {
+        const dn = (a.dayOfWeek || 0) - (b.dayOfWeek || 0);
+        if (dn) return dn;
+        const pn = String(a.periodRange || '').localeCompare(String(b.periodRange || ''), 'zh');
+        if (pn) return pn;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+    });
+
+    return rules;
+}
+
+function scheduleLLMCurrentTimeSlots() {
+    return (typeof scheduleLLMGetTimeSlotsFromInputs === 'function')
+        ? scheduleLLMGetTimeSlotsFromInputs()
+        : (Array.isArray(defaultTimeSlots) ? defaultTimeSlots : []);
+}
+
+function scheduleLLMParseWeeksForEditor(weeksRaw) {
+    const raw = String(weeksRaw || '').trim();
+    if (!raw) return [];
+
+    const parseNumList = (s, maxWeek) => {
+        if (!s) return [];
+        const set = new Set();
+        s.split(/[,，]/).forEach(part => {
+            const p = String(part || '').trim();
+            if (!p) return;
+            const mRange = p.match(/^(\d+)\s*-\s*(\d+)$/);
+            if (mRange) {
+                let a = parseInt(mRange[1], 10);
+                let b = parseInt(mRange[2], 10);
+                if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+                if (a <= 0 || a > maxWeek || b <= 0 || b > maxWeek) return;
+                if (b < a) b = a;
+                for (let i = a; i <= b; i++) set.add(i);
+                return;
+            }
+            if (/^\d+$/.test(p)) {
+                const n = parseInt(p, 10);
+                if (Number.isFinite(n) && n > 0 && n <= maxWeek) set.add(n);
+            }
+        });
+        return Array.from(set).sort((a, b) => a - b);
+    };
+
+    const maxWeek = 50;
+
+    const parsed = parseWeekString(raw);
+    if (parsed && parsed.length > 0) {
+        const hasComma = /[,，]/.test(raw);
+        const weekMarkCount = (raw.match(/[周Ww]/g) || []).length;
+
+        if (hasComma && weekMarkCount === 1) {
+            const stripped = raw.replace(/^\s*第\s*/g, '').replace(/\s*周\s*$/g, '');
+            if (stripped && stripped !== raw && /[,，]/.test(stripped) && /^[\d\s,，\-]+$/.test(stripped)) {
+                const alt = parseNumList(stripped, maxWeek);
+                if (alt.length > parsed.length) return alt;
+            }
+        }
+
+        return parsed;
+    }
+
+    const stripped = raw.replace(/^\s*第\s*/g, '').replace(/\s*周\s*$/g, '');
+    if (stripped && stripped !== raw) {
+        if (/^\s*\d+\s*(?:[,，]\s*\d+\s*)+$/.test(stripped)) {
+            const nums = stripped
+                .split(/[,，]/)
+                .map(x => parseInt(String(x).trim(), 10))
+                .filter(n => Number.isFinite(n) && n > 0 && n <= maxWeek);
+            return Array.from(new Set(nums)).sort((a, b) => a - b);
+        }
+        if (/[,，]/.test(stripped) && /^[\d\s,，\-]+$/.test(stripped)) {
+            return parseNumList(stripped, maxWeek);
+        }
+    }
+
+    if (/^\s*\d+\s*(?:[,，]\s*\d+\s*)+$/.test(raw)) {
+        const nums = raw
+            .split(/[,，]/)
+            .map(x => parseInt(String(x).trim(), 10))
+            .filter(n => Number.isFinite(n) && n > 0 && n <= maxWeek);
+        return Array.from(new Set(nums)).sort((a, b) => a - b);
+    }
+
+    if (/[,，]/.test(raw) && /^[\d\s,，\-]+$/.test(raw)) {
+        return parseNumList(raw, maxWeek);
+    }
+
+    return [];
+}
+
+function scheduleLLMNormalizeCourseRuleInput(input) {
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    const raw = input && typeof input === 'object' ? input : {};
+
+    const name = raw.name ? String(raw.name).trim() : '';
+    if (!name) return { ok: false, message: '课程名称不能为空' };
+
+    const dayOfWeek = parseInt(raw.dayOfWeek, 10);
+    if (!Number.isFinite(dayOfWeek) || dayOfWeek < 1 || dayOfWeek > 7) return { ok: false, message: '星期信息无效' };
+
+    const periodSeed = (raw.periodRange != null && String(raw.periodRange).trim())
+        ? String(raw.periodRange)
+        : (raw.period != null ? String(raw.period) : '');
+    const periodRange = scheduleLLMSanitizePeriodRange(periodSeed);
+    if (!periodRange) return { ok: false, message: '节次不能为空' };
+
+    const weeksRawInput = raw.weeksRaw ? String(raw.weeksRaw).trim() : '';
+    const weeksFromRaw = weeksRawInput ? scheduleLLMParseWeeksForEditor(weeksRawInput) : [];
+
+    const weeksFromArr = Array.isArray(raw.weeks)
+        ? raw.weeks
+            .map(n => parseInt(String(n).trim(), 10))
+            .filter(n => Number.isFinite(n) && n > 0 && n <= 50)
+        : [];
+
+    const weeksArrDedup = Array.from(new Set(weeksFromArr)).sort((a, b) => a - b);
+
+    const weeks = (weeksArrDedup.length > 0 && weeksArrDedup.length > (weeksFromRaw ? weeksFromRaw.length : 0))
+        ? weeksArrDedup
+        : (weeksFromRaw && weeksFromRaw.length > 0 ? weeksFromRaw : weeksArrDedup);
+
+    if (!weeks || weeks.length === 0) return { ok: false, message: '周次不能为空或格式不正确' };
+
+    const weeksRaw = weeksRawInput || ((utils && typeof utils.formatWeekRanges === 'function') ? utils.formatWeekRanges(weeks) : formatWeekRanges(weeks));
+
+    const slots = scheduleLLMCurrentTimeSlots();
+    const timeRange = (utils && typeof utils.getTimeRangeForPeriod === 'function')
+        ? utils.getTimeRangeForPeriod(slots, periodRange, null)
+        : null;
+    if (!timeRange) return { ok: false, message: '节次时间无效，请检查节次时间设置' };
+
+    return {
+        ok: true,
+        rule: {
+            id: raw.id ? String(raw.id) : scheduleLLMNewId(),
+            name,
+            rawName: raw.rawName ? String(raw.rawName) : name,
+            location: raw.location ? String(raw.location).trim() : '',
+            className: raw.className ? String(raw.className).trim() : '',
+            dayOfWeek,
+            periodRange,
+            weeksRaw,
+            weeks,
+            source: raw.source ? String(raw.source) : 'auto',
+            createdAt: Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : (raw.source === 'manual' ? Date.now() : 0)
+        }
+    };
+}
+
+function scheduleLLMValidateCourseRules(rules) {
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    if (!utils || typeof utils.getTimeRangeForPeriod !== 'function' || typeof utils.parseTimeToMinutes !== 'function') {
+        return { ok: true };
+    }
+
+    const slots = scheduleLLMCurrentTimeSlots();
+    const arr = Array.isArray(rules) ? rules : [];
+
+    const bySlot = new Map();
+    for (const r of arr) {
+        const norm = scheduleLLMNormalizeCourseRuleInput(r);
+        if (!norm.ok) return { ok: false, message: norm.message };
+
+        const rule = norm.rule;
+        const tr = utils.getTimeRangeForPeriod(slots, rule.periodRange, null);
+        if (!tr) return { ok: false, message: `课程“${rule.name}”节次时间无效` };
+
+        const sMin = utils.parseTimeToMinutes(tr.startTime);
+        const eMin = utils.parseTimeToMinutes(tr.endTime);
+        if (sMin == null || eMin == null || eMin <= sMin) return { ok: false, message: `课程“${rule.name}”时间无效` };
+
+        const loc = standardizeLocation(rule.location).location;
+
+        for (const wk of rule.weeks) {
+            const key = `${wk}-${rule.dayOfWeek}`;
+            if (!bySlot.has(key)) bySlot.set(key, []);
+            bySlot.get(key).push({
+                name: rule.name,
+                startMin: sMin,
+                endMin: eMin,
+                week: wk,
+                day: rule.dayOfWeek,
+                location: loc,
+                startPeriod: tr.startPeriod,
+                endPeriod: tr.endPeriod
+            });
+        }
+    }
+
+    const warnings = [];
+
+    for (const [key, list] of bySlot.entries()) {
+        const items = list.slice().sort((a, b) => a.startMin - b.startMin);
+        for (let i = 1; i < items.length; i++) {
+            const prev = items[i - 1];
+            const cur = items[i];
+            if (cur.startMin < prev.endMin) {
+                const parts = key.split('-');
+                const wk = parts[0];
+                const day = parseInt(parts[1], 10);
+                const dayLabel = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'][day] || '';
+
+                const sameTime = cur.startMin === prev.startMin && cur.endMin === prev.endMin;
+                const sameLoc = String(cur.location || '') === String(prev.location || '');
+                const samePeriod = (cur.startPeriod === prev.startPeriod) && (cur.endPeriod === prev.endPeriod);
+
+                if (sameTime && sameLoc && samePeriod) {
+                    warnings.push({ week: wk, day, dayLabel, a: prev.name, b: cur.name, location: cur.location });
+                    continue;
+                }
+
+                return { ok: false, message: `存在时间冲突：第${wk}周${dayLabel}“${prev.name}”与“${cur.name}”时间重叠` };
+            }
+        }
+    }
+
+    return warnings.length > 0 ? { ok: true, warnings } : { ok: true };
+}
+
+function scheduleLLMGenerateEventsFromCourseRules(rules) {
+    const utils = (typeof window !== 'undefined' && window.ScheduleLLMTimeUtils) ? window.ScheduleLLMTimeUtils : null;
+    const semesterStart = scheduleLLMGetSemesterStartDate();
+    if (!semesterStart) return [];
+
+    const slots = scheduleLLMCurrentTimeSlots();
+    const out = [];
+    const arr = Array.isArray(rules) ? rules : [];
+
+    for (const r0 of arr) {
+        const norm = scheduleLLMNormalizeCourseRuleInput(r0);
+        if (!norm.ok) continue;
+        const r = norm.rule;
+
+        const tr = (utils && typeof utils.getTimeRangeForPeriod === 'function')
+            ? utils.getTimeRangeForPeriod(slots, r.periodRange, null)
+            : null;
+        if (!tr) continue;
+
+        const periodNum = tr.startPeriod;
+        let timeOfDay = 'morning';
+        if (periodNum >= 5 && periodNum <= 8) timeOfDay = 'afternoon';
+        if (periodNum >= 9) timeOfDay = 'evening';
+
+        for (const weekNum of r.weeks) {
+            const daysToAdd = (weekNum - 1) * 7 + (r.dayOfWeek - 1);
+            const targetDate = new Date(semesterStart);
+            targetDate.setDate(semesterStart.getDate() + daysToAdd);
+
+            out.push({
+                title: r.name,
+                rawTitle: r.rawName,
+                location: r.location || '—',
+                className: r.className || '',
+                weeks: r.weeks,
+                periodRange: r.periodRange,
+                startTime: tr.startTime,
+                endTime: tr.endTime,
+                date: targetDate,
+                week: weekNum,
+                period: periodNum,
+                dayOfWeek: r.dayOfWeek,
+                timeOfDay: timeOfDay,
+                description: `课程: ${r.rawName || r.name}\n地点: ${r.location || '—'}\n周次: ${weekNum}周\n班级: ${r.className || ''}`
+            });
+        }
+    }
+
+    out.sort((a, b) => {
+        const ta = a.date.getTime();
+        const tb = b.date.getTime();
+        if (ta !== tb) return ta - tb;
+        if ((a.period || 0) !== (b.period || 0)) return (a.period || 0) - (b.period || 0);
+        return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
+    });
+
+    return out;
+}
+
+function scheduleLLMRenderFromCurrentEvents() {
+    scheduleLLMSetCourseListVisible(Array.isArray(generatedEvents) && generatedEvents.length > 0);
+    scheduleLLMSetMonthRangeFromEvents(generatedEvents);
+    const base = currentCalendarDate instanceof Date && Number.isFinite(currentCalendarDate.getTime())
+        ? currentCalendarDate
+        : new Date();
+    const target = scheduleLLMClampMonthToRange(base);
+    scheduleLLMRenderMonth(target, 0);
+}
+
+function scheduleLLMSetCourseRules(nextRules, action) {
+    const before = scheduleLLMDeepCloneRules(scheduleLLMCourseRules);
+    scheduleLLMCourseRules = Array.isArray(nextRules) ? nextRules : [];
+    scheduleLLMEditHistory = Array.isArray(scheduleLLMEditHistory) ? scheduleLLMEditHistory : [];
+    scheduleLLMEditHistory.push({
+        ts: new Date().toISOString(),
+        action: action ? String(action) : '修改',
+        before
+    });
+    if (scheduleLLMEditHistory.length > 120) {
+        scheduleLLMEditHistory.splice(0, scheduleLLMEditHistory.length - 120);
+    }
+
+    generatedEvents = scheduleLLMGenerateEventsFromCourseRules(scheduleLLMCourseRules);
+    scheduleLLMRenderFromCurrentEvents();
+}
+
+function scheduleLLMUndoLastEdit() {
+    if (!Array.isArray(scheduleLLMEditHistory) || scheduleLLMEditHistory.length === 0) return false;
+    const last = scheduleLLMEditHistory.pop();
+    scheduleLLMCourseRules = Array.isArray(last && last.before) ? last.before : [];
+    generatedEvents = scheduleLLMGenerateEventsFromCourseRules(scheduleLLMCourseRules);
+    scheduleLLMRenderFromCurrentEvents();
+    return true;
+}
+
+function scheduleLLMRenderCourseEditor(bodyEl) {
+    if (!bodyEl) return;
+    const root = bodyEl.querySelector('.course-editor');
+    if (!root) return;
+
+    const listEl = root.querySelector('[data-role="list"]');
+    const histEl = root.querySelector('[data-role="history"]');
+
+    const dayLabel = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+    const buildLabeledInput = (labelText, inputEl) => {
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        return { label, inputEl };
+    };
+
+    const createRuleCard = (rule) => {
+        const card = document.createElement('div');
+        card.className = 'course-editor-row';
+        card.dataset.id = rule.id;
+
+        const head = document.createElement('div');
+        head.className = 'course-editor-row-head';
+
+        const title = document.createElement('div');
+        title.className = 'course-editor-row-title';
+        title.textContent = rule.name || '未命名课程';
+        if (rule && String(rule.source || '') === 'manual') {
+            const tag = document.createElement('span');
+            tag.className = 'course-editor-manual-tag';
+            tag.textContent = '（手动添加）';
+            title.appendChild(tag);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'course-editor-row-actions';
+
+        const btnSave = document.createElement('button');
+        btnSave.type = 'button';
+        btnSave.className = 'btn-secondary';
+        btnSave.textContent = '保存';
+
+        const btnDel = document.createElement('button');
+        btnDel.type = 'button';
+        btnDel.className = 'btn-secondary';
+        btnDel.textContent = '删除';
+
+        actions.appendChild(btnSave);
+        actions.appendChild(btnDel);
+
+        head.appendChild(title);
+        head.appendChild(actions);
+
+        const form = document.createElement('div');
+        form.className = 'course-editor-form';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = rule.name || '';
+
+        const daySelect = document.createElement('select');
+        for (let i = 1; i <= 7; i++) {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = dayLabel[i];
+            daySelect.appendChild(opt);
+        }
+        daySelect.value = String(rule.dayOfWeek || 1);
+
+        const periodInput = document.createElement('input');
+        periodInput.type = 'text';
+        periodInput.value = rule.periodRange || '';
+
+        const weeksInput = document.createElement('input');
+        weeksInput.type = 'text';
+        weeksInput.placeholder = '请输入周次，多个周次用逗号分隔';
+        weeksInput.placeholder = '请输入周次，多个周次用逗号分隔';
+        weeksInput.value = rule.weeksRaw || '';
+
+        const locInput = document.createElement('input');
+        locInput.type = 'text';
+        locInput.value = rule.location || '';
+
+        const classInput = document.createElement('input');
+        classInput.type = 'text';
+        classInput.value = rule.className || '';
+
+        const fields = [
+            buildLabeledInput('课程', nameInput),
+            buildLabeledInput('星期', daySelect),
+            buildLabeledInput('节次', periodInput),
+            buildLabeledInput('周次', weeksInput),
+            buildLabeledInput('地点', locInput),
+            buildLabeledInput('班级', classInput)
+        ];
+
+        fields.forEach(({ label, inputEl }) => {
+            form.appendChild(label);
+            form.appendChild(inputEl);
+        });
+
+        card.appendChild(head);
+        card.appendChild(form);
+
+        const getDraft = () => ({
+            id: rule.id,
+            rawName: rule.rawName || rule.name,
+            name: nameInput.value,
+            dayOfWeek: daySelect.value,
+            periodRange: periodInput.value,
+            weeksRaw: weeksInput.value,
+            location: locInput.value,
+            className: classInput.value,
+            source: rule.source,
+            createdAt: rule.createdAt
+        });
+
+        btnSave.addEventListener('click', () => {
+            const draft = getDraft();
+            const nextRuleRes = scheduleLLMNormalizeCourseRuleInput(draft);
+            if (!nextRuleRes.ok) {
+                alert(nextRuleRes.message);
+                return;
+            }
+
+            const nextRules = (Array.isArray(scheduleLLMCourseRules) ? scheduleLLMCourseRules : []).map(r => {
+                return (r && r.id === rule.id) ? nextRuleRes.rule : r;
+            });
+
+            const valid = scheduleLLMValidateCourseRules(nextRules);
+            if (!valid.ok) {
+                alert(valid.message || '输入不合法');
+                return;
+            }
+
+            if (valid.warnings && valid.warnings.length > 0) {
+                const head = `检测到${valid.warnings.length}处“同一时间同一地点”的课程（可能重复/冲突）。\n\n`;
+                const lines = valid.warnings.slice(0, 6).map(w => {
+                    const loc = w.location ? ` @${w.location}` : '';
+                    return `- 第${w.week}周${w.dayLabel}：${w.a} 与 ${w.b}${loc}`;
+                }).join('\n');
+                const tail = valid.warnings.length > 6 ? `\n…还有${valid.warnings.length - 6}处未展示` : '';
+                const ok = confirm(head + lines + tail + '\n\n仍要保留并继续保存吗？');
+                if (!ok) return;
+            }
+
+            scheduleLLMSetCourseRules(nextRules, `更新：${nextRuleRes.rule.name}`);
+            scheduleLLMRenderCourseEditor(bodyEl);
+        });
+
+        btnDel.addEventListener('click', () => {
+            const ok = confirm(`确认删除课程“${rule.name || '未命名课程'}”？`);
+            if (!ok) return;
+
+            const nextRules = (Array.isArray(scheduleLLMCourseRules) ? scheduleLLMCourseRules : []).filter(r => r && r.id !== rule.id);
+            scheduleLLMSetCourseRules(nextRules, `删除：${rule.name || '课程'}`);
+            scheduleLLMRenderCourseEditor(bodyEl);
+        });
+
+        return card;
+    };
+
+    const createAddCard = () => {
+        const card = document.createElement('div');
+        card.className = 'course-editor-row';
+
+        const head = document.createElement('div');
+        head.className = 'course-editor-row-head';
+
+        const title = document.createElement('div');
+        title.className = 'course-editor-row-title';
+        title.textContent = '添加新课程';
+
+        const actions = document.createElement('div');
+        actions.className = 'course-editor-row-actions';
+
+        const btnAdd = document.createElement('button');
+        btnAdd.type = 'button';
+        btnAdd.className = 'btn-secondary';
+        btnAdd.textContent = '添加';
+
+        actions.appendChild(btnAdd);
+        head.appendChild(title);
+        head.appendChild(actions);
+
+        const form = document.createElement('div');
+        form.className = 'course-editor-form';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+
+        const daySelect = document.createElement('select');
+        for (let i = 1; i <= 7; i++) {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = dayLabel[i];
+            daySelect.appendChild(opt);
+        }
+        daySelect.value = '1';
+
+        const periodInput = document.createElement('input');
+        periodInput.type = 'text';
+
+        const weeksInput = document.createElement('input');
+        weeksInput.type = 'text';
+
+        const locInput = document.createElement('input');
+        locInput.type = 'text';
+
+        const classInput = document.createElement('input');
+        classInput.type = 'text';
+
+        const fields = [
+            buildLabeledInput('课程', nameInput),
+            buildLabeledInput('星期', daySelect),
+            buildLabeledInput('节次', periodInput),
+            buildLabeledInput('周次', weeksInput),
+            buildLabeledInput('地点', locInput),
+            buildLabeledInput('班级', classInput)
+        ];
+
+        fields.forEach(({ label, inputEl }) => {
+            form.appendChild(label);
+            form.appendChild(inputEl);
+        });
+
+        btnAdd.addEventListener('click', () => {
+            const draft = {
+                id: scheduleLLMNewId(),
+                name: nameInput.value,
+                dayOfWeek: daySelect.value,
+                periodRange: periodInput.value,
+                weeksRaw: weeksInput.value,
+                location: locInput.value,
+                className: classInput.value,
+                source: 'manual',
+                createdAt: Date.now()
+            };
+
+            const nextRuleRes = scheduleLLMNormalizeCourseRuleInput(draft);
+            if (!nextRuleRes.ok) {
+                alert(nextRuleRes.message);
+                return;
+            }
+
+            const nextRules = (Array.isArray(scheduleLLMCourseRules) ? scheduleLLMCourseRules : []).concat([nextRuleRes.rule]);
+            const valid = scheduleLLMValidateCourseRules(nextRules);
+            if (!valid.ok) {
+                alert(valid.message || '输入不合法');
+                return;
+            }
+
+            if (valid.warnings && valid.warnings.length > 0) {
+                const head = `检测到${valid.warnings.length}处“同一时间同一地点”的课程（可能重复/冲突）。\n\n`;
+                const lines = valid.warnings.slice(0, 6).map(w => {
+                    const loc = w.location ? ` @${w.location}` : '';
+                    return `- 第${w.week}周${w.dayLabel}：${w.a} 与 ${w.b}${loc}`;
+                }).join('\n');
+                const tail = valid.warnings.length > 6 ? `\n…还有${valid.warnings.length - 6}处未展示` : '';
+                const ok = confirm(head + lines + tail + '\n\n仍要保留并继续添加吗？');
+                if (!ok) return;
+            }
+
+            scheduleLLMSetCourseRules(nextRules, `添加：${nextRuleRes.rule.name}`);
+            scheduleLLMRenderCourseEditor(bodyEl);
+        });
+
+        card.appendChild(head);
+        card.appendChild(form);
+        return card;
+    };
+
+    const renderHistory = () => {
+        if (!histEl) return;
+
+        const pad2 = (n) => String(n).padStart(2, '0');
+
+        const formatBeijingTime = (ts) => {
+            if (!ts) return '';
+            const d = new Date(ts);
+            if (!Number.isFinite(d.getTime())) return '';
+
+            try {
+                if (typeof Intl !== 'undefined' && Intl && typeof Intl.DateTimeFormat === 'function') {
+                    return new Intl.DateTimeFormat('zh-CN', {
+                        timeZone: 'Asia/Shanghai',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    }).format(d);
+                }
+            } catch (_) {
+            }
+
+            const ms = d.getTime() + 8 * 60 * 60 * 1000;
+            const bj = new Date(ms);
+            return `${pad2(bj.getUTCHours())}:${pad2(bj.getUTCMinutes())}:${pad2(bj.getUTCSeconds())}`;
+        };
+
+        const hist = Array.isArray(scheduleLLMEditHistory) ? scheduleLLMEditHistory : [];
+        if (hist.length === 0) {
+            histEl.textContent = '';
+            return;
+        }
+
+        histEl.textContent = '';
+        const recent = hist.slice(-8).reverse();
+        recent.forEach(h => {
+            const row = document.createElement('div');
+            row.className = 'course-editor-history-item';
+            const t = document.createElement('span');
+            t.className = 'course-editor-history-item-time';
+            t.textContent = formatBeijingTime(h && h.ts);
+            const tx = document.createElement('span');
+            tx.className = 'course-editor-history-item-text';
+            tx.textContent = h && h.action ? String(h.action) : '修改';
+            row.appendChild(t);
+            row.appendChild(tx);
+            histEl.appendChild(row);
+        });
+    };
+
+    const render = () => {
+        if (listEl) {
+            listEl.textContent = '';
+            listEl.appendChild(createAddCard());
+
+            const rules = Array.isArray(scheduleLLMCourseRules) ? scheduleLLMCourseRules.slice() : [];
+            rules.sort((a, b) => {
+                const aManual = a && String(a.source || '') === 'manual';
+                const bManual = b && String(b.source || '') === 'manual';
+                if (aManual !== bManual) return aManual ? -1 : 1;
+
+                const aCreated = Number.isFinite(Number(a && a.createdAt)) ? Number(a.createdAt) : 0;
+                const bCreated = Number.isFinite(Number(b && b.createdAt)) ? Number(b.createdAt) : 0;
+                if (aCreated !== bCreated) return bCreated - aCreated;
+
+                const dn = (a.dayOfWeek || 0) - (b.dayOfWeek || 0);
+                if (dn) return dn;
+                const pn = String(a.periodRange || '').localeCompare(String(b.periodRange || ''), 'zh');
+                if (pn) return pn;
+                return String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+            });
+
+            rules.forEach(r => {
+                if (!r || !r.id) return;
+                listEl.appendChild(createRuleCard(r));
+            });
+        }
+
+        renderHistory();
+    };
+
+    render();
 }
 
 // Rendering Logic
@@ -3267,9 +4058,13 @@ function scheduleLLMUpdateCourseListForMonth(monthDate) {
             const time = ev.startTime && ev.endTime ? `${ev.startTime}-${ev.endTime}` : '';
             const loc = ev.location ? String(ev.location) : '—';
             const wk = ev.week ? `第${ev.week}周` : '';
+            const dayIdx = Number.isFinite(ev.dayOfWeek)
+                ? ev.dayOfWeek
+                : (ev.date ? ((ev.date.getDay() === 0) ? 7 : ev.date.getDay()) : null);
+            const dayLabel = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'][dayIdx] || '';
             parts.push(
                 `<div class="course-list-item">` +
-                `<div class="course-list-item-head"><div class="course-list-item-name">${String(ev.title || '未命名课程')}</div><div class="course-list-item-meta"><span>${wk}</span><span>第${String(pRange)}节</span></div></div>` +
+                `<div class="course-list-item-head"><div class="course-list-item-name">${String(ev.title || '未命名课程')}</div><div class="course-list-item-meta"><span>${wk}</span><span>${dayLabel}</span><span>第${String(pRange)}节</span></div></div>` +
                 `<div class="course-list-item-meta"><span>${time}</span><span>${loc}</span></div>` +
                 `</div>`
             );
@@ -3294,7 +4089,10 @@ function scheduleLLMEnsureCalendarScaffold() {
         nav.className = 'calendar-nav no-print';
         nav.innerHTML = `
             <button type="button" class="calendar-nav-btn prev">前一个月</button>
-            <div class="calendar-nav-title"></div>
+            <div class="calendar-nav-center">
+                <div class="calendar-nav-title"></div>
+                <button type="button" class="calendar-nav-btn editor" id="btnCourseEditor">核对/编辑</button>
+            </div>
             <button type="button" class="calendar-nav-btn next">后一个月</button>
         `;
 
@@ -3303,11 +4101,31 @@ function scheduleLLMEnsureCalendarScaffold() {
 
         container.appendChild(nav);
         container.appendChild(viewport);
+    }
 
-        const prevBtn = nav.querySelector('button.prev');
-        const nextBtn = nav.querySelector('button.next');
-        if (prevBtn) prevBtn.addEventListener('click', () => scheduleLLMChangeMonth(-1));
-        if (nextBtn) nextBtn.addEventListener('click', () => scheduleLLMChangeMonth(1));
+    const prevBtn = nav.querySelector('button.prev');
+    const nextBtn = nav.querySelector('button.next');
+    if (prevBtn) prevBtn.onclick = () => scheduleLLMChangeMonth(-1);
+    if (nextBtn) nextBtn.onclick = () => scheduleLLMChangeMonth(1);
+
+    let editBtn = nav.querySelector('#btnCourseEditor');
+    if (!editBtn) {
+        const center = nav.querySelector('.calendar-nav-center');
+        if (center) {
+            editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'calendar-nav-btn editor';
+            editBtn.id = 'btnCourseEditor';
+            editBtn.textContent = '核对/编辑';
+            center.appendChild(editBtn);
+        }
+    }
+
+    if (editBtn) {
+        editBtn.onclick = () => {
+            const fn = (typeof window !== 'undefined') ? window.scheduleLLMOpenSiteModal : null;
+            if (typeof fn === 'function') fn('editor');
+        };
     }
 
     return {
@@ -3315,8 +4133,9 @@ function scheduleLLMEnsureCalendarScaffold() {
         nav,
         viewport,
         titleEl: nav.querySelector('.calendar-nav-title'),
-        prevBtn: nav.querySelector('button.prev'),
-        nextBtn: nav.querySelector('button.next')
+        prevBtn: prevBtn,
+        nextBtn: nextBtn,
+        editBtn: editBtn
     };
 }
 
@@ -3328,6 +4147,9 @@ function scheduleLLMRenderMonth(date, direction) {
     currentCalendarDate = monthDate;
 
     if (els.titleEl) els.titleEl.textContent = scheduleLLMFormatMonthTitle(monthDate);
+    if (els.editBtn) {
+        els.editBtn.disabled = !(Array.isArray(scheduleLLMCourseRules) && scheduleLLMCourseRules.length > 0);
+    }
 
     const prevTarget = scheduleLLMMonthStart(new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1));
     const nextTarget = scheduleLLMMonthStart(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1));
@@ -3512,11 +4334,11 @@ function createMonthCalendarElement(date, options) {
         const groupedEvents = new Map();
 
         dayEvents.forEach(ev => {
-            const key = `${ev.period}-${ev.location}-${ev.title}`;
+            const key = `${ev.period}-${ev.location}-${ev.title}-${ev.className || ''}`;
             if (!groupedEvents.has(key)) {
                 groupedEvents.set(key, {
                     ...ev,
-                    classNames: [ev.className] // Initialize list
+                    classNames: [ev.className]
                 });
             } else {
                 const existing = groupedEvents.get(key);
@@ -3666,12 +4488,12 @@ if (btnPrint) {
         const restore = () => {
             area.innerHTML = OriginalHTML;
 
-            const nav = area.querySelector('.calendar-nav');
-            if (nav) {
-                const prevBtn = nav.querySelector('button.prev');
-                const nextBtn = nav.querySelector('button.next');
-                if (prevBtn) prevBtn.addEventListener('click', () => scheduleLLMChangeMonth(-1));
-                if (nextBtn) nextBtn.addEventListener('click', () => scheduleLLMChangeMonth(1));
+            const base = (currentCalendarDate instanceof Date && Number.isFinite(currentCalendarDate.getTime()))
+                ? currentCalendarDate
+                : new Date();
+
+            if (typeof scheduleLLMRenderMonth === 'function') {
+                scheduleLLMRenderMonth(base, 0);
             }
 
             window.dispatchEvent(new Event('resize'));
@@ -3725,6 +4547,53 @@ if (btnPrint) {
             });
         }
     });
+}
+
+async function scheduleLLMTestPrintEditorFlow() {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const assert = (cond, msg) => {
+        if (!cond) throw new Error(msg);
+    };
+
+    const backdrop = document.getElementById('siteModalBackdrop');
+    assert(backdrop, '找不到弹窗容器 #siteModalBackdrop');
+
+    const openEditorAndClose = async () => {
+        const btn = document.getElementById('btnCourseEditor');
+        assert(btn, '找不到“核对/编辑”按钮 #btnCourseEditor');
+        btn.click();
+        await sleep(60);
+        assert(!backdrop.hidden, '点击“核对/编辑”后弹窗未打开');
+
+        const titleEl = document.getElementById('siteModalTitle');
+        assert(titleEl && String(titleEl.textContent || '').includes('核对'), '弹窗标题不正确或未渲染');
+
+        const closeBtn = document.getElementById('siteModalClose');
+        assert(closeBtn, '找不到弹窗关闭按钮 #siteModalClose');
+        closeBtn.click();
+        await sleep(240);
+        assert(backdrop.hidden, '关闭弹窗后 backdrop 未隐藏');
+    };
+
+    assert(Array.isArray(generatedEvents) && generatedEvents.length > 0, '请先生成月历：generatedEvents 为空');
+    await openEditorAndClose();
+
+    const printBtn = document.getElementById('btnPrint');
+    assert(printBtn, '找不到“打印月历”按钮 #btnPrint');
+    printBtn.click();
+    await sleep(60);
+
+    const cancelBtn = document.getElementById('scheduleLLMPrintCancel');
+    assert(cancelBtn, '未进入打印预览或找不到返回按钮 #scheduleLLMPrintCancel');
+    cancelBtn.click();
+    await sleep(120);
+
+    await openEditorAndClose();
+    return true;
+}
+
+if (typeof window !== 'undefined') {
+    window.scheduleLLMTestPrintEditorFlow = scheduleLLMTestPrintEditorFlow;
 }
 
 // Export Logic
@@ -3925,7 +4794,7 @@ document.getElementById('btnExport').addEventListener('click', () => {
 });
 
 // HTML Export
-document.getElementById('btnSaveHtml').addEventListener('click', () => {
+document.getElementById('btnSaveHtml').addEventListener('click', async () => {
     if (generatedEvents.length === 0) {
         alert("无日程数据");
         return;
@@ -3993,7 +4862,11 @@ document.getElementById('btnSaveHtml').addEventListener('click', () => {
             text-align: center;
         }
 
-        .export-header h1 {
+        .export-title {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
             font-size: 2.5rem;
             font-weight: 800;
             color: var(--primary);
@@ -4001,9 +4874,25 @@ document.getElementById('btnSaveHtml').addEventListener('click', () => {
             letter-spacing: -0.025em;
         }
 
+        .export-logo {
+            height: 1em;
+            width: auto;
+            flex: 0 0 auto;
+        }
+
         .export-header p {
             color: var(--text-muted);
             font-size: 1.1rem;
+        }
+
+        .export-site-link {
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px solid currentColor;
+        }
+
+        .export-site-link:hover {
+            opacity: 0.9;
         }
 
         .content-wrapper {
@@ -4224,6 +5113,46 @@ document.getElementById('btnSaveHtml').addEventListener('click', () => {
         }
     `;
 
+    const getExportLogoDataUrl = async () => {
+        const src = 'Logo_yedaoai_Green_Web600.png';
+        try {
+            const img = new Image();
+            img.decoding = 'async';
+            img.loading = 'eager';
+            img.src = src;
+
+            await new Promise((resolve, reject) => {
+                img.onload = () => resolve();
+                img.onerror = () => reject(new Error('logo_load_failed'));
+            });
+
+            const w0 = img.naturalWidth || img.width || 0;
+            const h0 = img.naturalHeight || img.height || 0;
+            if (!w0 || !h0) return '';
+
+            const targetH = 64;
+            const scale = Math.min(1, targetH / h0);
+            const w = Math.max(1, Math.round(w0 * scale));
+            const h = Math.max(1, Math.round(h0 * scale));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return '';
+            ctx.drawImage(img, 0, 0, w, h);
+
+            const dataUrl = canvas.toDataURL('image/png');
+            return (dataUrl && dataUrl.startsWith('data:image/')) ? dataUrl : '';
+        } catch (_) {
+            return '';
+        }
+    };
+
+    const logoDataUrl = await getExportLogoDataUrl();
+    const logoSrc = logoDataUrl || 'Logo_yedaoai_Green_Web600.png';
+
     const fullHtml = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -4238,8 +5167,8 @@ document.getElementById('btnSaveHtml').addEventListener('click', () => {
 </head>
 <body>
     <header class="export-header">
-        <h1>我的课程表</h1>
-        <p>由析课识别生成</p>
+        <h1 class="export-title"><img class="export-logo" src="${logoSrc}" alt="YedaoAI" loading="eager" decoding="async" onerror="this.style.display='none';">课程表月历</h1>
+        <p>由析课识别生成 · <a class="export-site-link" href="https://yedaoai.com" target="_blank" rel="noopener noreferrer">yedaoai.com</a></p>
     </header>
     <div class="content-wrapper">
         ${container.innerHTML}
@@ -4311,6 +5240,14 @@ function scheduleLLMInitSiteModal() {
             titleEl.textContent = '关于析课';
             const content = scheduleLLMCloneTemplate('tmplAboutXike');
             if (content) bodyEl.appendChild(content);
+            return;
+        }
+
+        if (type === 'editor') {
+            titleEl.textContent = '核对与编辑';
+            const content = scheduleLLMCloneTemplate('tmplCourseEditor');
+            if (content) bodyEl.appendChild(content);
+            scheduleLLMRenderCourseEditor(bodyEl);
             return;
         }
 
@@ -4386,6 +5323,11 @@ function scheduleLLMInitSiteModal() {
             if (lastActiveEl && typeof lastActiveEl.focus === 'function') lastActiveEl.focus();
         }, 180);
     };
+
+    if (typeof window !== 'undefined') {
+        window.scheduleLLMOpenSiteModal = openModal;
+        window.scheduleLLMCloseSiteModal = closeModal;
+    }
 
     btnAbout.addEventListener('click', () => openModal('about'));
     btnContact.addEventListener('click', () => openModal('contact'));
