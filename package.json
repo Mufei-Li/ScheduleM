@@ -3,12 +3,26 @@
   "private": true,
   "version": "0.0.0",
   "description": "ScheduleLLM debug utilities",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "dependencies": {
     "dotenv": "^17.2.3"
+  },
+  "overrides": {
+    "react-native-reanimated": "3.16.7"
   },
   "scripts": {
     "start": "node server_debug.js",
     "test": "node tests/time_adjust.test.js"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.2.1",
+    "esbuild": "^0.27.3",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.3"
   }
 }
-

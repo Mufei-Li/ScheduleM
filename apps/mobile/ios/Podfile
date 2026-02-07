@@ -1,0 +1,84 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+Encoding.default_external = Encoding::UTF_8
+Encoding.default_internal = Encoding::UTF_8
+STDOUT.set_encoding('UTF-8')
+STDERR.set_encoding('UTF-8')
+ENV['LANG'] = 'en_US.UTF-8' unless ENV['LANG'].to_s.include?('UTF-8')
+ENV['LC_ALL'] = 'en_US.UTF-8' unless ENV['LC_ALL'].to_s.include?('UTF-8')
+
+if defined?(Pod::Executable) && Pod::Executable.respond_to?(:execute_command)
+  singleton = class << Pod::Executable; self; end
+  unless singleton.method_defined?(:__schedulem_execute_command_utf8)
+    singleton.class_eval do
+      alias_method(:__schedulem_execute_command_utf8, :execute_command)
+
+      define_method(:__schedulem_force_utf8) do |obj|
+        case obj
+        when String
+          obj.dup.force_encoding('UTF-8')
+        when Array
+          obj.map { |v| __schedulem_force_utf8(v) }
+        when Hash
+          obj.each_with_object({}) do |(k, v), h|
+            h[__schedulem_force_utf8(k)] = __schedulem_force_utf8(v)
+          end
+        else
+          obj
+        end
+      end
+
+      define_method(:execute_command) do |*args|
+        utf8_args = __schedulem_force_utf8(args)
+        out = __schedulem_execute_command_utf8(*utf8_args)
+        if out.is_a?(String)
+          out = out.dup
+          out.force_encoding('UTF-8')
+          out = out.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+        end
+        out
+      end
+    end
+  end
+end
+
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'ScheduleM' do
+  config = use_native_modules!
+  react_native_path = config[:reactNativePath].to_s.force_encoding('UTF-8')
+  app_path = "#{Pod::Config.instance.installation_root}/..".to_s.force_encoding('UTF-8')
+
+  use_react_native!(
+    :path => react_native_path,
+    # An absolute path to your application root.
+    :app_path => app_path
+  )
+
+  target 'ScheduleMTests' do
+    inherit! :complete
+    # Pods for testing
+  end
+
+  post_install do |installer|
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      react_native_path,
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+  end
+end
