@@ -1514,9 +1514,16 @@ input[type="time"] {
     display: none;
 }
 
-.placeholder-text.placeholder-uploaded,
 .placeholder-text.status-updated {
     font-size: clamp(0.95rem, 1.3vw, 1.1rem);
+}
+
+.placeholder-text.placeholder-uploaded {
+    font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+    font-weight: 600;
+    min-height: 190px;
+    padding: 16px 18px;
+    white-space: pre-line;
 }
 
 .placeholder-text.status-updated {
@@ -1679,6 +1686,10 @@ input[type="time"] {
     .placeholder-text {
         min-height: 120px;
         padding: 10px 12px;
+    }
+
+    .placeholder-text.placeholder-uploaded {
+        min-height: 150px;
     }
 
     .placeholder-hint {

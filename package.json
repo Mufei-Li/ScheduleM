@@ -6,9 +6,12 @@
   "dependencies": {
     "dotenv": "^17.2.3"
   },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  },
   "scripts": {
     "start": "node server_debug.js",
-    "test": "node tests/time_adjust.test.js"
+    "test": "node --test tests/*.test.js"
   }
 }
 

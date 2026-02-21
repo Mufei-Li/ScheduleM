@@ -1186,6 +1186,67 @@ async function scheduleLLMOCRToGrid() {
     throw new Error('ocr_removed');
 }
 
+function scheduleLLMGetConfig(path) {
+    const key = String(path || '').trim();
+    if (!key) return null;
+
+    if (key === 'semester.startDate') {
+        const input = document.getElementById('semesterStart');
+        const v = input && input.value ? String(input.value).trim() : '';
+        if (!v) return null;
+        const d = new Date(v);
+        if (!Number.isFinite(d.getTime())) return null;
+        return v;
+    }
+
+    return null;
+}
+
+function scheduleLLMEnsureUploadedPlaceholderResizeListener() {
+    if (typeof window === 'undefined' || !window) return;
+    if (window.__scheduleLLMUploadedPlaceholderResizeBound) return;
+
+    window.__scheduleLLMUploadedPlaceholderResizeBound = true;
+    window.addEventListener('resize', () => {
+        const el = window.__scheduleLLMUploadedPlaceholderEl;
+        if (el) scheduleLLMAdjustPlaceholderBox(el);
+    }, { passive: true });
+}
+
+function scheduleLLMAdjustPlaceholderBox(placeholder, opts) {
+    const el = placeholder;
+    if (!el) return;
+
+    const run = () => {
+        const heights = (opts && typeof opts.getHeights === 'function')
+            ? opts.getHeights(el)
+            : { clientHeight: el.clientHeight, scrollHeight: el.scrollHeight };
+
+        const ch = heights && Number.isFinite(heights.clientHeight) ? heights.clientHeight : 0;
+        const sh = heights && Number.isFinite(heights.scrollHeight) ? heights.scrollHeight : 0;
+
+        if (sh > ch + 1) {
+            el.style.minHeight = `${Math.ceil(sh)}px`;
+            return;
+        }
+        if (!opts || !opts.preserveMinHeight) {
+            el.style.minHeight = '';
+        }
+    };
+
+    if (opts && opts.sync) {
+        run();
+        return;
+    }
+
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(run);
+        return;
+    }
+
+    setTimeout(run, 0);
+}
+
 function scheduleLLMOnScheduleFileLoaded(fileName) {
     const els = scheduleLLMUploadEls();
     if (els.fileName) els.fileName.textContent = "已加载: " + fileName;
@@ -1194,8 +1255,14 @@ function scheduleLLMOnScheduleFileLoaded(fileName) {
     if (calendarArea) {
         const placeholder = calendarArea.querySelector('.placeholder-text');
         if (placeholder) {
-            placeholder.textContent = "课表文件已上传，请设定开学第一天日期，并设定节次时间。";
+            const currentSemesterStartDate = scheduleLLMGetConfig('semester.startDate') || '未设定';
+            placeholder.textContent = `课表文件已上传成功，请确认开学第一天日期，并设定节次时间。\n目前开学第一天日期设定为 ${currentSemesterStartDate}`;
             placeholder.classList.add('placeholder-uploaded');
+            if (typeof window !== 'undefined' && window) {
+                window.__scheduleLLMUploadedPlaceholderEl = placeholder;
+            }
+            scheduleLLMEnsureUploadedPlaceholderResizeListener();
+            scheduleLLMAdjustPlaceholderBox(placeholder);
         }
 
         const msg = "已成功上传课表[" + fileName + "]";
@@ -1213,6 +1280,9 @@ function scheduleLLMOnScheduleFileLoaded(fileName) {
         window.scheduleLLMUploadMessageTimer = setTimeout(() => {
             toast.classList.add('calendar-toast-hide');
         }, 5000);
+        if (window.scheduleLLMUploadMessageTimer && typeof window.scheduleLLMUploadMessageTimer.unref === 'function') {
+            window.scheduleLLMUploadMessageTimer.unref();
+        }
 
         if (typeof scheduleLLMHideCalendarProgress === 'function') {
             scheduleLLMHideCalendarProgress(1200);
@@ -5348,3 +5418,11 @@ function scheduleLLMInitSiteModal() {
 }
 
 scheduleLLMInitSiteModal();
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        scheduleLLMGetConfig,
+        scheduleLLMAdjustPlaceholderBox,
+        scheduleLLMOnScheduleFileLoaded
+    };
+}
