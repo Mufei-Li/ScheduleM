@@ -8,7 +8,7 @@ class LLMService {
         this.config = {
             baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
             apiKey: '',
-            model: 'qwen-flash'
+            model: 'qwen3.5-flash'
         };
         this.cache = new Map();
     }

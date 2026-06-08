@@ -15,7 +15,7 @@ const REQUIRE_SAME_ORIGIN = String(env('REQUIRE_SAME_ORIGIN', 'true')).toLowerCa
 
 const LLM_BASE_URL = String(env('LLM_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')).replace(/\/$/, '');
 const LLM_API_KEY = String(env('LLM_API_KEY', ''));
-const DEFAULT_MODEL = String(env('LLM_MODEL', 'qwen-flash'));
+const DEFAULT_MODEL = String(env('LLM_MODEL', 'qwen3.5-flash'));
 
 const MAX_PDF_BODY_BYTES = Number(env('MAX_PDF_BODY_BYTES', '52428800'));
 const DEFAULT_PYTHON_BIN = (() => {
