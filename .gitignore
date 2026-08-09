@@ -1,0 +1,30 @@
+.env
+.env.*
+!.env.example
+config.js
+*.pem
+*.key
+
+# Local recovery archives and transient extraction directories
+.local-archive/
+.codex-staging-schedulem/
+
+node_modules/
+**/node_modules/
+
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+.venv/
+**/.venv/
+venv/
+
+*.log
+coverage/
+.DS_Store
+Thumbs.db
+
+# Candidate schedule files require a privacy review before publication.
+samples/legacy-schedules/
