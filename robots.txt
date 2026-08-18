@@ -1,0 +1,13 @@
+User-agent: *
+# 允许抓取所有核心页面
+Allow: /
+# 禁止抓取的目录（和Nginx配置一致）
+Disallow: /admin/
+Disallow: /node_modules/
+Disallow: /conf/
+Disallow: /logs/
+Disallow: /pm2/
+# 禁止抓取动态接口（爬虫无需抓API）
+Disallow: /api/
+# 站点地图地址
+Sitemap: https://yedaoai.com/sitemap.xml

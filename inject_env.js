@@ -35,7 +35,7 @@ if (fs.existsSync(envPath)) {
 // 2. Extract specific variables
 const config = {
     llmApiUrl: process.env.LLM_API_URL || "/api/llm",
-    model: process.env.LLM_MODEL || "qwen-flash"
+    model: process.env.LLM_MODEL || "qwen3.7-flash"
 };
 
 // 3. Generate config.js content
